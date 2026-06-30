@@ -1,0 +1,454 @@
+{
+    "metadata": {
+        "project_count": 1,
+        "jobs_count": 32,
+        "horizon": 243
+    },
+    "resources": {
+        "renewable": 4,
+        "availabilities": [
+            32,
+            20,
+            31,
+            23
+        ],
+        "shift_modes": [
+            2,
+            2,
+            1,
+            2
+        ]
+    },
+    "jobs": [
+        {
+            "id": 0,
+            "duration": 0,
+            "resource_requests": [
+                0,
+                0,
+                0,
+                0
+            ],
+            "successors": [
+                2
+            ]
+        },
+        {
+            "id": 1,
+            "duration": 8,
+            "resource_requests": [
+                0,
+                0,
+                2,
+                0
+            ],
+            "successors": [
+                7,
+                10,
+                19
+            ]
+        },
+        {
+            "id": 2,
+            "duration": 1,
+            "resource_requests": [
+                2,
+                7,
+                0,
+                7
+            ],
+            "successors": [
+                5,
+                6
+            ]
+        },
+        {
+            "id": 3,
+            "duration": 7,
+            "resource_requests": [
+                0,
+                7,
+                0,
+                0
+            ],
+            "successors": [
+                8
+            ]
+        },
+        {
+            "id": 4,
+            "duration": 8,
+            "resource_requests": [
+                9,
+                0,
+                3,
+                10
+            ],
+            "successors": [
+                9,
+                27
+            ]
+        },
+        {
+            "id": 5,
+            "duration": 14,
+            "resource_requests": [
+                6,
+                0,
+                0,
+                0
+            ],
+            "successors": [
+                11,
+                12
+            ]
+        },
+        {
+            "id": 6,
+            "duration": 14,
+            "resource_requests": [
+                8,
+                0,
+                0,
+                5
+            ],
+            "successors": []
+        },
+        {
+            "id": 7,
+            "duration": 6,
+            "resource_requests": [
+                0,
+                1,
+                0,
+                4
+            ],
+            "successors": [
+                9,
+                16
+            ]
+        },
+        {
+            "id": 8,
+            "duration": 13,
+            "resource_requests": [
+                9,
+                2,
+                0,
+                0
+            ],
+            "successors": [
+                13
+            ]
+        },
+        {
+            "id": 9,
+            "duration": 3,
+            "resource_requests": [
+                0,
+                0,
+                0,
+                9
+            ],
+            "successors": [
+                17
+            ]
+        },
+        {
+            "id": 10,
+            "duration": 6,
+            "resource_requests": [
+                10,
+                5,
+                0,
+                2
+            ],
+            "successors": [
+                17,
+                20
+            ]
+        },
+        {
+            "id": 11,
+            "duration": 8,
+            "resource_requests": [
+                1,
+                10,
+                0,
+                0
+            ],
+            "successors": []
+        },
+        {
+            "id": 12,
+            "duration": 10,
+            "resource_requests": [
+                3,
+                0,
+                5,
+                9
+            ],
+            "successors": [
+                23
+            ]
+        },
+        {
+            "id": 13,
+            "duration": 13,
+            "resource_requests": [
+                10,
+                4,
+                0,
+                0
+            ],
+            "successors": [
+                18,
+                24,
+                25
+            ]
+        },
+        {
+            "id": 14,
+            "duration": 13,
+            "resource_requests": [
+                10,
+                0,
+                8,
+                3
+            ],
+            "successors": [
+                18
+            ]
+        },
+        {
+            "id": 15,
+            "duration": 8,
+            "resource_requests": [
+                0,
+                7,
+                1,
+                7
+            ],
+            "successors": [
+                21,
+                26
+            ]
+        },
+        {
+            "id": 16,
+            "duration": 7,
+            "resource_requests": [
+                0,
+                0,
+                0,
+                4
+            ],
+            "successors": [
+                17
+            ]
+        },
+        {
+            "id": 17,
+            "duration": 3,
+            "resource_requests": [
+                0,
+                0,
+                0,
+                2
+            ],
+            "successors": []
+        },
+        {
+            "id": 18,
+            "duration": 11,
+            "resource_requests": [
+                7,
+                2,
+                0,
+                0
+            ],
+            "successors": [
+                22,
+                30
+            ]
+        },
+        {
+            "id": 19,
+            "duration": 13,
+            "resource_requests": [
+                8,
+                0,
+                3,
+                1
+            ],
+            "successors": [
+                20,
+                27
+            ]
+        },
+        {
+            "id": 20,
+            "duration": 8,
+            "resource_requests": [
+                5,
+                1,
+                5,
+                0
+            ],
+            "successors": []
+        },
+        {
+            "id": 21,
+            "duration": 7,
+            "resource_requests": [
+                0,
+                0,
+                0,
+                9
+            ],
+            "successors": []
+        },
+        {
+            "id": 22,
+            "duration": 6,
+            "resource_requests": [
+                8,
+                0,
+                0,
+                0
+            ],
+            "successors": []
+        },
+        {
+            "id": 23,
+            "duration": 14,
+            "resource_requests": [
+                0,
+                5,
+                9,
+                4
+            ],
+            "successors": [
+                28
+            ]
+        },
+        {
+            "id": 24,
+            "duration": 3,
+            "resource_requests": [
+                0,
+                0,
+                5,
+                2
+            ],
+            "successors": [
+                29
+            ]
+        },
+        {
+            "id": 25,
+            "duration": 4,
+            "resource_requests": [
+                0,
+                9,
+                7,
+                5
+            ],
+            "successors": [
+                29
+            ]
+        },
+        {
+            "id": 26,
+            "duration": 4,
+            "resource_requests": [
+                0,
+                1,
+                10,
+                0
+            ],
+            "successors": [
+                28
+            ]
+        },
+        {
+            "id": 27,
+            "duration": 8,
+            "resource_requests": [
+                0,
+                0,
+                10,
+                0
+            ],
+            "successors": []
+        },
+        {
+            "id": 28,
+            "duration": 7,
+            "resource_requests": [
+                0,
+                0,
+                5,
+                10
+            ],
+            "successors": []
+        },
+        {
+            "id": 29,
+            "duration": 6,
+            "resource_requests": [
+                2,
+                0,
+                10,
+                0
+            ],
+            "successors": [
+                31
+            ]
+        },
+        {
+            "id": 30,
+            "duration": 10,
+            "resource_requests": [
+                7,
+                0,
+                2,
+                0
+            ],
+            "successors": [
+                31
+            ]
+        },
+        {
+            "id": 31,
+            "duration": 0,
+            "resource_requests": [
+                0,
+                0,
+                0,
+                0
+            ],
+            "successors": []
+        }
+    ],
+    "orders": [
+        {
+            "component_id": 0,
+            "sink_node": 3,
+            "weight": 5,
+            "due_date": 72
+        },
+        {
+            "component_id": 1,
+            "sink_node": 1,
+            "weight": 6,
+            "due_date": 108
+        },
+        {
+            "component_id": 2,
+            "sink_node": 28,
+            "weight": 3,
+            "due_date": 108
+        }
+    ]
+}

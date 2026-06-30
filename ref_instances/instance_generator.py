@@ -8,7 +8,7 @@ import numpy as np
 
 sys.path.append("../")
 
-from instances.problem_instance import ProblemInstance, Project, PrecedenceRelation, RequestAndDuration, PrecedenceGraph
+from problem_instance import ProblemInstance, Project, PrecedenceRelation, RequestAndDuration, PrecedenceGraph
 from util.constants import DATA_FOLDER, HOURS_IN_DAY, DUE_DATES_PER_DAY
 
 __author__ = "Martina Kopecká"

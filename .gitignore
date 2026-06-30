@@ -1,0 +1,6 @@
+.venv
+**/__pycache__/
+
+*.run
+
+_viz.py
