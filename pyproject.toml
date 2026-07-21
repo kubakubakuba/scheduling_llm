@@ -10,5 +10,9 @@ dependencies = [
     "networkx>=3.6.1",
     "pandas>=3.0.3",
     "plotly>=6.8.0",
+    "rcpspsandbox",
     "typer>=0.26.8",
 ]
+
+[tool.uv.sources]
+rcpspsandbox = { git = "https://github.com/kubakubakuba/RCPSPSandbox" }
