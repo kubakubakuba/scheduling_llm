@@ -1,4 +1,4 @@
-from docplex.cp.model import CpoModel
+from docplex.cp.model import CpoModel, CpoStepFunction, INTERVAL_MAX
 
 class MRCPSP_solver:
 	def __init__(self, jobs, durations, predecessors, resources, requests, shifts, orders):
@@ -31,14 +31,27 @@ class MRCPSP_solver:
 		for k in self.res:
 			usage = 0
 
+			#1 for off-hour (unavailable)
+			avail_step = CpoStepFunction()
+
+			#mark shift with 1 as available
+			for start, end, cap in self.shifts.get(k, []):
+				if cap > 0:
+					avail_step.set_value(start, end, 1)
+
 			for j in self.jobs:
 				req_amount = self.req.get((j, k), 0)
 
 				if req_amount > 0:
 					usage += self.m.pulse(self.job_vars[j], req_amount)
+					
+					#forbid overlapping
+					self.m.add(self.m.forbid_extent(self.job_vars[j], avail_step))
 
-			for start, end, cap in self.shifts[k]:
-				self.m.add(self.m.always_in(usage, start, end, 0, cap))
+			#constrain capacity
+			for start, end, cap in self.shifts.get(k, []):
+				if cap > 0:
+					self.m.add(self.m.always_in(usage, start, end, 0, cap))
 
 		#objective
 		tardiness = 0
@@ -91,80 +104,9 @@ class MRCPSP_solver:
 
 
 if __name__ == "__main__":
-	#0 is source, 5 is sink
-	jobs = [0, 1, 2, 3, 4, 5]
+	#solver = MRCPSP_solver(jobs, duration, predecessors, resources, requests, shifts, orders)
+	#solver.init_model()
+	#solver.solve()
+	#solver.print_solution()
 
-	duration = {
-		0: 0,
-		1: 10,
-		2: 8,
-		3: 15,
-		4: 5,
-		5: 0
-	}
-
-	predecessors = {
-		0: [],
-		1: [0],
-		2: [0],
-		3: [1],
-		4: [2],
-		5: [3, 4]
-	}
-
-	resources = ['R1', 'R2']
-
-	requests = {
-		(1, 'R1'): 2,
-		(1, 'R2'): 0,
-
-		(2, 'R1'): 1,
-		(2, 'R2'): 1,
-
-		(3, 'R1'): 0,
-		(3, 'R2'): 2,
-
-		(4, 'R1'): 1,
-		(4, 'R2'): 1
-	}
-
-	shifts = {
-		'R1': [
-			(0, 16, 2),
-			(16, 24, 0),
-			(24, 40, 2),
-			(40, 48, 0),
-			(48, 100, 2)
-		],
-		'R2': [
-			(0, 20, 2),
-			(20, 24, 0),
-			(24, 44, 2),
-			(44, 48, 0),
-			(48, 100, 2)
-		]
-	}
-
-	orders = [
-		{
-			'component_id': 'Order_A',
-			'sink_job': 4,
-			'due_date': 15,
-			'weight': 2
-		},
-		{
-			'component_id': 'Order_B',
-			'sink_job': 5,
-			'due_date': 30,
-			'weight': 5
-		}
-	]
-
-	solver = RCPSP_solver(jobs, duration, predecessors, resources, requests, shifts, orders)
-
-	solver.init_model()
-
-	solver.solve()
-
-	solver.print_solution()
-
+	pass

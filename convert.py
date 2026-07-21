@@ -2,6 +2,7 @@ import os
 import glob
 import json
 import typer
+import random
 
 from rcpsp_sandbox.instances.io import parse_psplib
 from rcpsp_sandbox.instances.problem_modifier import modify_instance
@@ -26,31 +27,36 @@ def convert(
 	if not sm_files:
 		typer.echo(f"Error: No .sm files found in {input_dir}")
 		raise typer.Exit()
+	
+	shift_patterns = [
+		[(6, 14), (14, 22)],
+		[(8, 18)],
+		[(0, 12), (12, 24)],
+		[(6, 18)],
+		[(0, 24)]
+	]
 
 	for filepath in sm_files:
 		filename = os.path.basename(filepath)
 		json_filename = filename.replace(".sm", ".json")
 		output_path = os.path.join(output_dir, json_filename)
 		
-		typer.echo(f"Processing {filename}")
+		typer.echo(f"\nProcessing {filename}")
 		
 		base_instance = parse_psplib(filepath)
-		
-		modifier = modify_instance(base_instance)
-		
-		shifts_config = {r.key: [(6, 22)] for r in base_instance.resources}
-		modifier.assign_resource_availabilities(availabilities=shifts_config)
-		
-		modifier.split_job_components(split="gradual", gradual_level=2)
-		
+
+		print("Precedences:", [(p.id_parent, p.id_child) for p in base_instance.precedences])
+
 		#true earliest finish times (critical path)
-		durations = {j.id_job: j.duration for j in modifier.jobs}
-		adj = {j.id_job: [] for j in modifier.jobs}
-		in_degree = {j.id_job: 0 for j in modifier.jobs}
+		durations = {j.id_job: j.duration for j in base_instance.jobs}
+		adj = {j.id_job: [] for j in base_instance.jobs}
+		in_degree = {j.id_job: 0 for j in base_instance.jobs}
 		
-		for p in modifier.precedences:
-			adj[p.id_parent].append(p.id_child)
-			in_degree[p.id_child] += 1
+		for p in base_instance.precedences:
+			parent = p.id_child
+			child = p.id_parent
+			adj[parent].append(child)
+			in_degree[child] += 1
 			
 		#init Q
 		queue = [j for j, deg in in_degree.items() if deg == 0]
@@ -72,6 +78,12 @@ def convert(
 					
 		deadlines = {j: int(ef * tightness) for j, ef in earliest_finish.items()}
 		
+		modifier = modify_instance(base_instance)
+		
+		shifts_config = {r.key: random.choice(shift_patterns) for r in base_instance.resources}
+		
+		modifier.assign_resource_availabilities(availabilities=shifts_config)
+		modifier.split_job_components(split="gradual", gradual_level=2)
 		#assign manually created
 		modifier.assign_job_due_dates(due_dates=deadlines)
 		
@@ -80,7 +92,9 @@ def convert(
 		#flatten predecessors
 		preds = {j.id_job: [] for j in modified_instance.jobs}
 		for p in modified_instance.precedences:
-			preds[p.id_parent].append(p.id_child)
+			parent = p.id_child
+			child = p.id_parent
+			preds[parent].append(child)
 			
 		#flatten requests
 		req_list = []
@@ -91,11 +105,16 @@ def convert(
 					
 		#shifts
 		shift_dict = {}
+		horizon = 300 #TODO: do not hardcode a magic num
 		for r in modified_instance.resources:
 			r_shifts = []
 			if r.availability and r.availability.periodical_intervals:
 				for interval in r.availability.periodical_intervals:
-					r_shifts.append([interval.start, interval.end, interval.capacity])
+					for day in range(0, horizon, 24):
+						s = interval.start + day
+						e = interval.end + day
+						r_shifts.append([s, e, interval.capacity])
+
 			shift_dict[r.key] = r_shifts
 			
 		#orders
@@ -119,6 +138,9 @@ def convert(
 			"shifts": shift_dict,
 			"orders": orders_list
 		}
+
+		for order in orders_list:
+			print(f"Sink {order['sink_job']} due_date = {order['due_date']}")
 		
 		with open(output_path, 'w', encoding='utf-8') as f:
 			json.dump(json_data, f, indent=2)
