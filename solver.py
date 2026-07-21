@@ -76,6 +76,19 @@ class MRCPSP_solver:
 			if var_sol:
 				print(f"Job {j}: [{var_sol.get_start()}, {var_sol.get_end()}]")
 
+	def get_schedule(self):
+		if not self.sol or not self.sol.is_solution():
+			return None
+
+		schedule = {}
+		
+		for j in self.jobs:
+			var_sol = self.sol.get_var_solution(self.job_vars[j])
+			if var_sol:
+				schedule[j] = (var_sol.get_start(), var_sol.get_end())
+		
+		return schedule
+
 
 if __name__ == "__main__":
 	#0 is source, 5 is sink

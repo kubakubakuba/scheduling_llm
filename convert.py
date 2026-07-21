@@ -80,7 +80,7 @@ def convert(
 		#flatten predecessors
 		preds = {j.id_job: [] for j in modified_instance.jobs}
 		for p in modified_instance.precedences:
-			preds[p.id_child].append(p.id_parent)
+			preds[p.id_parent].append(p.id_child)
 			
 		#flatten requests
 		req_list = []
@@ -102,10 +102,10 @@ def convert(
 		orders_list = []
 		for c in modified_instance.components:
 			sink_id = c.id_root_job
-			job_obj = modified_instance.jobs_by_id[sink_id]
+			
 			orders_list.append({
 				"sink_job": sink_id,
-				"due_date": job_obj.due_date if job_obj.due_date else 0,
+				"due_date": deadlines.get(sink_id, 0),
 				"weight": c.weight
 			})
 		
