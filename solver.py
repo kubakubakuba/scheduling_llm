@@ -109,4 +109,4 @@ if __name__ == "__main__":
 	#solver.solve()
 	#solver.print_solution()
 
-	pass
+	raise NotImplementedError("Do not run this module directly, use the MRCPSP_solver class implemented within!")
