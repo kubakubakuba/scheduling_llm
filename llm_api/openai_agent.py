@@ -13,11 +13,11 @@ load_dotenv()
 #client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 #client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_KEY"))
 
-#client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_KEY"))
-client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
+client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_KEY"))
+#client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
-#model_name = "inclusionai/ling-3.0-flash:free" #'gpt-4o' for openai models or "inclusionai/ling-3.0-flash:free" for OpenRouter or "local-model" for LMS
-model_name = "google/gemma-4-12b-qat"
+model_name = "inclusionai/ling-3.0-flash:free" #'gpt-4o' for openai models or "inclusionai/ling-3.0-flash:free" for OpenRouter or "local-model" for LMS
+#model_name = "google/gemma-4-12b-qat"
 
 ###############
 
@@ -33,7 +33,7 @@ system_instruction = (
 
 prompt = (
 	"First solve the given instance of this optimization problem with the given solver and obtain its objective."
-	"Change the due dates of all sink jobs 5 units to the future (for each sink job)."
+	"Job 6 now precedes job 30, change the precedences, so it satisfies this condition."
 	"After modifying it, run the solver to check the new weighted tardiness objective and compare it with the original value."
 	"Print out a nice summary of what has been done, with a table listing all the changes made to the json instance file. Explain why did the change in the objective happen and which job is causing it (contributes most to it)."
 )

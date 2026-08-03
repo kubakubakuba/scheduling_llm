@@ -24,7 +24,7 @@ def visualize(
 	typer.echo(f"Loading instance: {path}")
 	instance_data = load_instance(path)
 
-	typer.echo("Solving...")
+	typer.echo("Solving")
 	solver = MRCPSP_solver(**instance_data)
 	solver.init_model()
 	obj_val = solver.solve(time_limit=time_limit, log_output=log_output)

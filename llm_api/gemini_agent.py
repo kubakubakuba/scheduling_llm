@@ -7,7 +7,7 @@ import toolcalls
 load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
 
-toolcalls.load_instance("../data/jsons/j302_5.json")
+toolcalls.load_instance("../data/jsons/j3010_5.json")
 
 chat = client.chats.create(
 	model="gemini-3.5-flash-lite",
