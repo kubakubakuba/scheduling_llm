@@ -6,16 +6,18 @@ def build_precedence_graph(jobs, predecessors, orders):
 	G = nx.DiGraph()
 	for j in jobs:
 		G.add_node(j)
-		
+
 	parents_of = defaultdict(list)
-	for pred, succs in predecessors.items():
-		for succ in succs:
-			G.add_edge(pred, succ)
-			parents_of[succ].append(pred)
+
+	# CORRECTED: Draw edges FROM the predecessor TO the job
+	for job, preds in predecessors.items():
+		for p in preds:
+			G.add_edge(p, job)
+			parents_of[job].append(p)
 
 	for j in G.nodes:
 		G.nodes[j]['layer'] = 0
-		
+
 	for node in nx.topological_sort(G):
 		for child in G.successors(node):
 			G.nodes[child]['layer'] = max(G.nodes[child].get('layer', 0), G.nodes[node]['layer'] + 1)
@@ -34,7 +36,7 @@ def build_precedence_graph(jobs, predecessors, orders):
 
 	unassigned = [n for n in G.nodes if n not in job_to_order]
 	orders_list = [o['sink_job'] for o in orders]
-	
+
 	if unassigned:
 		orders_list.append("Unassigned")
 		order_names["Unassigned"] = "Unassigned Jobs"
@@ -42,18 +44,18 @@ def build_precedence_graph(jobs, predecessors, orders):
 			job_to_order[n] = "Unassigned"
 
 	pos = {}
-	x_spacing = 5 
+	x_spacing = 5
 	order_y_spacing = 8
 	node_y_spacing = 1.5
 
 	for o_idx, sink in enumerate(orders_list):
 		y_base = -o_idx * order_y_spacing
 		order_nodes = [n for n in G.nodes if job_to_order.get(n) == sink]
-		
+
 		layer_dict = defaultdict(list)
 		for n in order_nodes:
 			layer_dict[G.nodes[n]['layer']].append(n)
-			
+
 		for layer, nodes_in_layer in layer_dict.items():
 			num_nodes = len(nodes_in_layer)
 			offset = (num_nodes - 1) * node_y_spacing / 2.0
@@ -81,7 +83,7 @@ def build_precedence_graph(jobs, predecessors, orders):
 		node_x.append(x)
 		node_y.append(y)
 		node_text.append(str(node))
-		
+
 		if node in sink_jobs:
 			node_color.append("#ff7f0e")
 			hover_text.append(f"<b>Sink job {node}</b><br>Due date: {sink_jobs[node]['due_date']}<br>Weight: {sink_jobs[node]['weight']}")
@@ -91,7 +93,7 @@ def build_precedence_graph(jobs, predecessors, orders):
 
 	fig = go.Figure()
 	order_boxes = {}
-	
+
 	for node, (x, y) in pos.items():
 		sink = job_to_order.get(node)
 		if sink is not None:
@@ -118,7 +120,7 @@ def build_precedence_graph(jobs, predecessors, orders):
 			layer="below"
 		)
 		fig.add_annotation(
-			x=box['min_x'] - padding_x, 
+			x=box['min_x'] - padding_x,
 			y=box['max_y'] + padding_y,
 			text=label_text,
 			showarrow=False,
@@ -128,28 +130,28 @@ def build_precedence_graph(jobs, predecessors, orders):
 		)
 
 	fig.add_trace(go.Scatter(
-		x=edge_x, y=edge_y, 
-		line=dict(width=1, color='#888'), 
-		mode='lines', 
+		x=edge_x, y=edge_y,
+		line=dict(width=1, color='#888'),
+		mode='lines',
 		hoverinfo='none'
 	))
-	
+
 	fig.add_trace(go.Scatter(
-		x=node_x, y=node_y, 
+		x=node_x, y=node_y,
 		mode='markers+text',
-		text=node_text, 
+		text=node_text,
 		textposition="middle center",
 		textfont=dict(color="white"),
 		marker=dict(size=30, color=node_color, line=dict(width=2, color='black')),
-		hovertext=hover_text, 
+		hovertext=hover_text,
 		hoverinfo='text'
 	))
 
 	fig.update_layout(
-		title="Precedence graph by orders", 
-		showlegend=False, 
-		xaxis=dict(visible=False), 
-		yaxis=dict(visible=False), 
+		title="Precedence graph by orders",
+		showlegend=False,
+		xaxis=dict(visible=False),
+		yaxis=dict(visible=False),
 		template="plotly_white",
 		height=300 * len(orders_list)
 	)

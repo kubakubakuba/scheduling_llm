@@ -6,3 +6,5 @@
 _viz.py
 
 .env
+
+.chainlit/

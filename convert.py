@@ -53,8 +53,8 @@ def convert(
 		in_degree = {j.id_job: 0 for j in base_instance.jobs}
 		
 		for p in base_instance.precedences:
-			parent = p.id_child
-			child = p.id_parent
+			parent = p.id_parent
+			child = p.id_child
 			adj[parent].append(child)
 			in_degree[child] += 1
 			
@@ -92,8 +92,8 @@ def convert(
 		#flatten predecessors
 		preds = {j.id_job: [] for j in modified_instance.jobs}
 		for p in modified_instance.precedences:
-			parent = p.id_child
-			child = p.id_parent
+			parent = p.id_parent
+			child = p.id_child
 			preds[parent].append(child)
 			
 		#flatten requests
