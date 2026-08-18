@@ -4,10 +4,12 @@ import sys
 import io
 import jsonschema
 from collections import defaultdict
+import copy
 
 sys.path.append(os.path.abspath(".."))
 from solver import MRCPSP_solver
 from llm_api.schema_validator import validate_instance
+from llm_api.graph_validator import validate_precedence_graph
 
 #caching
 current_instance = {}
@@ -175,6 +177,8 @@ def visualize_schedule() -> dict:
 	shifts = current_instance.get("shifts", {})
 	orders = current_instance.get("orders", [])
 	orders_map = {str(o["sink_job"]): o for o in orders}
+	max_due_date = max((o.get("due_date", 0) for o in orders), default=0)
+	chart_max = max(max_end, max_due_date, 1)
 
 	gantt_data = {}
 	for r in resources:
@@ -200,32 +204,40 @@ def visualize_schedule() -> dict:
 				if not overlap: break
 
 			placed_rects.append((s, e, y_base, y_base + amount))
-			is_sink = str(j) in orders_map
+			order = orders_map.get(str(j))
+			is_sink = order is not None
+			due_date = order["due_date"] if order else None
+			weight = order["weight"] if order else None
+			tardiness = max(0, e - due_date) if order else None
+			weighted_contribution = weight * tardiness if order else None
 			tasks.append({
 				"job": j, "start": s, "end": e, "amount": amount, "y_base": y_base,
 				"is_sink": is_sink,
-				"due_date": orders_map[str(j)]["due_date"] if is_sink else None
+				"due_date": due_date,
+				"weight": weight,
+				"tardiness": tardiness,
+				"weighted_contribution": weighted_contribution
 			})
 
 		cap_intervals = []
 		for start, end, c in shifts.get(r, []):
-			if start <= max_end:
-				cap_intervals.append({"start": start, "end": min(end, max_end), "cap": c})
+			if start <= chart_max:
+				cap_intervals.append({"start": start, "end": min(end, chart_max), "cap": c})
 
 		gantt_data[r] = {"tasks": tasks, "capacity": cap_intervals}
 
 	usage_data = {}
 	for r in resources:
-		usage = [0] * (max_end + 1)
+		usage = [0] * (chart_max + 1)
 		for (j, res), amount in requests.items():
 			if res == r and str(j) in latest_schedule:
 				s, e = latest_schedule[str(j)]
-				for t in range(s, min(e, max_end + 1)):
+				for t in range(s, min(e, chart_max + 1)):
 					usage[t] += amount
 
-		cap = [0] * (max_end + 1)
+		cap = [0] * (chart_max + 1)
 		for start, end, c in shifts.get(r, []):
-			for t in range(start, min(end, max_end + 1)):
+			for t in range(start, min(end, chart_max + 1)):
 				cap[t] = c
 
 		usage_data[r] = {"usage": usage, "capacity": cap}
@@ -275,10 +287,63 @@ def visualize_schedule() -> dict:
 		"status": "success",
 		"visualization_type": "full_dashboard",
 		"weighted_tardiness": latest_obj_val,
-		"max_time": max_end,
+		"max_time": chart_max,
+		"schedule_end": max_end,
 		"gantt": gantt_data,
 		"usage": usage_data,
 		"precedence": {"nodes": precedence_nodes, "edges": precedence_edges, "max_x": max_x, "max_y": max_y}
+	}
+
+def add_precedence(predecessor: int, successor: int) -> dict:
+	global current_instance, latest_schedule, latest_obj_val
+
+	candidate = copy.deepcopy(current_instance)
+
+	if predecessor not in candidate["jobs"]:
+		return {
+			"status": "rejected",
+			"error": f"Job {predecessor} does not exist."
+		}
+
+	if successor not in candidate["jobs"]:
+		return {
+			"status": "rejected",
+			"error": f"Job {successor} does not exist."
+		}
+
+	predecessor_list = candidate["predecessors"].setdefault(
+		str(successor), []
+	)
+
+	if predecessor in predecessor_list:
+		return {
+			"status": "no_change",
+			"message": (
+				f"Precedence {predecessor} -> {successor} "
+				"already exists."
+			)
+		}
+
+	predecessor_list.append(predecessor)
+
+	try:
+		validate_instance(candidate)
+		validate_precedence_graph(candidate)
+	except (ValueError, jsonschema.ValidationError) as error:
+		return {
+			"status": "rejected",
+			"error": str(error),
+			"instance_changed": False
+		}
+
+	current_instance = candidate
+	latest_schedule = {}
+	latest_obj_val = None
+
+	return {
+		"status": "success",
+		"message": f"Added precedence {predecessor} -> {successor}.",
+		"instance_changed": True
 	}
 
 openai_tools_schema = [
@@ -375,6 +440,33 @@ openai_tools_schema = [
 				"type": "object",
 				"properties": {},
 				"required": [],
+				"additionalProperties": False
+			}
+		}
+	},
+	{
+	"type": "function",
+		"function": {
+			"name": "add_precedence",
+			"description": (
+				"Atomically add predecessor -> successor. "
+				"The backend rejects duplicates, unknown jobs, "
+				"self-loops, and precedence cycles."
+			),
+			"strict": True,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"predecessor": {
+						"type": "integer",
+						"description": "Job that must finish first."
+					},
+					"successor": {
+						"type": "integer",
+						"description": "Job that may start afterwards."
+					}
+				},
+				"required": ["predecessor", "successor"],
 				"additionalProperties": False
 			}
 		}

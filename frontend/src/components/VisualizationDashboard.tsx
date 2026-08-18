@@ -18,6 +18,13 @@ export default function VisualizationDashboard({ data }: { data: any }) {
         <div className="p-4 flex-1 overflow-auto bg-[#0a0a0a]">
         {activeTab === 'gantt' && (
             <div className="space-y-6 inline-block min-w-full" style={{ width: `${Math.max(safeMaxTime * 20, 600)}px` }}>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[10px] text-zinc-400">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-blue-600" />Job</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-amber-600" />Order on time</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-600" />Tardy order</span>
+            <span className="flex items-center gap-1.5"><span className="w-4 border-t border-dashed border-fuchsia-400" />Due date</span>
+            <span className="text-zinc-600">Hover over a job for details</span>
+            </div>
             {Object.entries(data.gantt).map(([res, resData]: [string, any]) => {
                 const maxAmt = Math.max(...resData.capacity.map((c: any) => c.cap), 1);
                 const pxPerUnit = 20;
@@ -38,10 +45,32 @@ export default function VisualizationDashboard({ data }: { data: any }) {
                     ))}
                     {resData.tasks.map((t: any, i: number) => {
                         const isTardy = t.due_date !== null && t.end > t.due_date;
+                        const tooltip = [
+                            `Job ${t.job}`,
+                            `Start: ${t.start}`,
+                            `End: ${t.end}`,
+                            `Duration: ${t.end - t.start}`,
+                            `Resource demand: ${t.amount}`,
+                            ...(t.is_sink ? [
+                                `Order due date: ${t.due_date}`,
+                                `Status: ${isTardy ? 'tardy' : 'on time'}`,
+                                `Tardiness: ${t.tardiness}`,
+                                `Weight: ${t.weight}`,
+                                `Weighted contribution: ${t.weighted_contribution}`
+                            ] : [])
+                        ].join('\n');
+
                         return (
-                            <div key={`task-${i}`}>
+                            <div key={`task-${i}`} className="group">
                             {t.due_date !== null && (
-                                <div className="absolute top-0 bottom-0 w-0.5 bg-red-500/50 z-0" style={{ left: `${(t.due_date / safeMaxTime) * 100}%` }} />
+                                <div
+                                className="pointer-events-none absolute top-0 bottom-0 z-20 border-l border-dashed border-fuchsia-400/80"
+                                style={{ left: `${(t.due_date / safeMaxTime) * 100}%` }}
+                                >
+                                <span className="absolute top-0 left-1 rounded bg-fuchsia-950/90 px-1 py-0.5 text-[9px] text-fuchsia-200 whitespace-nowrap">
+                                D={t.due_date}
+                                </span>
+                                </div>
                             )}
                             <div className={`absolute rounded border border-[#0d0d0d] flex items-center justify-center text-[10px] text-white overflow-hidden z-10 ${
                                 isTardy ? 'bg-red-600' : t.is_sink ? 'bg-amber-600' : 'bg-blue-600'
@@ -52,9 +81,28 @@ export default function VisualizationDashboard({ data }: { data: any }) {
                                 bottom: t.y_base * pxPerUnit,
                                 height: t.amount * pxPerUnit
                             }}
-                            title={`Job ${t.job} | Start: ${t.start} | End: ${t.end} | Req: ${t.amount}`}
+                            title={tooltip}
                             >
-                            <span className="truncate px-1">{t.job}</span>
+                            <span className="truncate px-1">{t.job}{t.is_sink ? ' ◆' : ''}</span>
+                            </div>
+                            <div
+                            className="pointer-events-none absolute z-30 hidden min-w-48 -translate-x-1/2 rounded-md border border-zinc-700 bg-zinc-950/95 p-2.5 text-[10px] leading-4 text-zinc-300 shadow-xl group-hover:block"
+                            style={{
+                                left: `${(((t.start + t.end) / 2) / safeMaxTime) * 100}%`,
+                                bottom: t.y_base * pxPerUnit + t.amount * pxPerUnit + 6
+                            }}
+                            >
+                            <div className="mb-1 font-semibold text-white">Job {t.job}{t.is_sink ? ' · Order sink' : ''}</div>
+                            <div>Start: {t.start} · End: {t.end}</div>
+                            <div>Duration: {t.end - t.start} · Demand: {t.amount}</div>
+                            {t.is_sink && (
+                                <div className="mt-1 border-t border-zinc-800 pt-1">
+                                <div>Due date: <span className="text-fuchsia-300">{t.due_date}</span></div>
+                                <div>Status: <span className={isTardy ? 'text-red-300' : 'text-emerald-300'}>{isTardy ? 'Tardy' : 'On time'}</span></div>
+                                <div>Tardiness: {t.tardiness} · Weight: {t.weight}</div>
+                                <div>Objective contribution: {t.weighted_contribution}</div>
+                                </div>
+                            )}
                             </div>
                             </div>
                         );
