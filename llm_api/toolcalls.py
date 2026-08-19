@@ -83,13 +83,9 @@ def _commit_candidate(candidate: dict, message: str) -> dict:
 
 	return result
 
-
-def load_instance(filepath: str) -> dict:
+def load_instance_data(candidate: dict) -> dict:
 	global current_instance
 	global current_revision
-
-	with open(filepath, "r", encoding="utf-8") as file:
-		candidate = json.load(file)
 
 	errors = validate_instance(candidate)
 
@@ -106,6 +102,12 @@ def load_instance(filepath: str) -> dict:
 		"revision": current_revision,
 		"instance_modified": False,
 	}
+
+def load_instance(filepath: str) -> dict:
+	with open(filepath, "r", encoding="utf-8") as file:
+		candidate = json.load(file)
+
+	return load_instance_data(candidate)
 
 def get_current_instance() -> dict:
 	return current_instance
@@ -258,11 +260,7 @@ def run_solver(time_limit: int = 30) -> dict:
 	validation_errors = validate_instance(current_instance)
 
 	if validation_errors:
-		latest_schedule = {}
-		latest_obj_val = None
-		latest_solver = None
-		latest_solver_result = None
-		latest_solved_revision = None
+		_invalidate_solver_cache()
 
 		return {
 			"status": "invalid_instance",
@@ -283,7 +281,7 @@ def run_solver(time_limit: int = 30) -> dict:
 
 		result = solver.solve(
 			time_limit=time_limit,
-			log_output=True,
+			log_output=False,
 		)
 
 		#store model definition for conflict refiner
@@ -309,7 +307,6 @@ def run_solver(time_limit: int = 30) -> dict:
 
 			latest_obj_val = result.get("objective")
 
-			# Keep the names currently expected by your visualisation code.
 			result["schedule"] = latest_schedule
 			result["weighted_tardiness"] = latest_obj_val
 
@@ -352,8 +349,7 @@ def run_solver(time_limit: int = 30) -> dict:
 			"The solver returned an unrecognised status.",
 		)
 
-		# Refinement is allowed only for a proven infeasible result belonging
-		# to the current instance revision.
+		#refinement for infeasible CPO
 		result["conflict_refiner_available"] = (
 			status == "infeasible"
 			and latest_solved_revision == current_revision
@@ -362,12 +358,8 @@ def run_solver(time_limit: int = 30) -> dict:
 		return result
 
 	except Exception as exc:
-		# Do not leave a previous solver result available after a failed run.
-		latest_schedule = {}
-		latest_obj_val = None
-		latest_solver = None
-		latest_solver_result = None
-		latest_solved_revision = None
+		#no result after failed run
+		_invalidate_solver_cache()
 
 		return {
 			"status": "solver_error",
@@ -385,8 +377,29 @@ def visualize_schedule() -> dict:
 	global current_instance, latest_schedule, latest_obj_val
 	print("\n[TOOL CALLED] visualize_schedule")
 
-	if not current_instance or not latest_schedule:
-		return {"status": "error", "error": "No schedule available. Please run the solver first."}
+	if not current_instance:
+		return {
+			"status": "error",
+			"error_code": "no_instance",
+			"error": "No instance is currently loaded."
+		}
+
+	if latest_solved_revision != current_revision:
+		return {
+			"status": "error",
+			"error_code": "stale_solver_result",
+			"error": (
+				"The instance changed after the last solve. "
+				"Run the solver again."
+			)
+		}
+
+	if not latest_schedule:
+		return {
+			"status": "error",
+			"error_code": "no_schedule",
+			"error": "No schedule is available. Run the solver first."
+		}
 
 	max_end = max((e for s, e in latest_schedule.values() if e is not None), default=0)
 	resources = current_instance.get("resources", [])

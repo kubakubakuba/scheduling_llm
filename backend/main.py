@@ -12,6 +12,10 @@ import traceback
 import llm_api.toolcalls as toolcalls
 import llm_api.schema as schema
 
+MAX_HISTORY_MESSAGES = 12
+MAX_MESSAGE_CHARS = 6000
+MAX_TOOL_RESULT_CHARS = 12000
+
 load_dotenv()
 
 app = FastAPI()
@@ -23,6 +27,67 @@ app.add_middleware(
 	allow_methods=["*"],
 	allow_headers=["*"],
 )
+
+def compact_history(history: list[dict]) -> list[dict]:
+	result = []
+
+	for message in history:
+		role = message.get("role")
+
+		# Tool messages and assistant tool-call messages are execution traces,
+		# not useful long-term conversation context.
+		if role == "tool":
+			continue
+
+		if role == "assistant" and message.get("tool_calls"):
+			continue
+
+		if role not in {"user", "assistant"}:
+			continue
+
+		result.append({
+			"role": role,
+			"content": (message.get("content") or "")[:MAX_MESSAGE_CHARS],
+		})
+
+	return result[-MAX_HISTORY_MESSAGES:]
+
+
+def compact_tool_result(function_name: str, result: dict) -> str:
+	if function_name == "visualize_schedule":
+		compact = {
+			"status": result.get("status"),
+			"visualization_type": result.get("visualization_type"),
+			"weighted_tardiness": result.get("weighted_tardiness"),
+			"message": (
+				"The visualization was generated and displayed in the UI. "
+				"The large dashboard payload is intentionally omitted from "
+				"the model context."
+			),
+		}
+		return json.dumps(compact)
+
+	raw = json.dumps(result, separators=(",", ":"))
+
+	if len(raw) <= MAX_TOOL_RESULT_CHARS:
+		return raw
+
+	compact = {
+		"status": result.get("status"),
+		"error_code": result.get("error_code"),
+		"message": "Large tool output omitted from model context.",
+	}
+
+	if function_name == "run_solver":
+		schedule = result.get("schedule")
+		compact["has_solution"] = result.get("has_solution", False)
+		compact["objective"] = result.get("objective")
+		compact["weighted_tardiness"] = result.get("weighted_tardiness")
+		compact["schedule_job_count"] = (
+			len(schedule) if isinstance(schedule, dict) else 0
+		)
+
+	return json.dumps(compact)
 
 with open("config.toml", "rb") as f:
 	config = tomllib.load(f)
@@ -51,10 +116,24 @@ async def upload_instance(file: UploadFile = File(...)):
 	content = await file.read()
 	try:
 		instance_data = json.loads(content)
-		toolcalls.current_instance = instance_data
-		return {"message": f"Successfully loaded {file.filename}", "instance": instance_data}
 	except json.JSONDecodeError:
-		raise HTTPException(status_code=400, detail="Invalid JSON file structure.")
+		raise HTTPException(
+			status_code=400,
+			detail="Invalid JSON file structure."
+		)
+
+	load_result = toolcalls.load_instance_data(instance_data)
+
+	if load_result["status"] != "success":
+		raise HTTPException(
+			status_code=422,
+			detail=load_result
+		)
+
+	return {
+		"message": f"Successfully loaded {file.filename}",
+		"revision": load_result["revision"],
+	}
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
@@ -68,17 +147,7 @@ async def chat_endpoint(request: ChatRequest):
 
 	client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
-	clean_history = []
-	for msg in request.history:
-		clean_msg = {
-			"role": msg.get("role"),
-			"content": msg.get("content", "")
-		}
-		if msg.get("tool_calls"):
-			clean_msg["tool_calls"] = msg["tool_calls"]
-		if msg.get("tool_call_id"):
-			clean_msg["tool_call_id"] = msg["tool_call_id"]
-		clean_history.append(clean_msg)
+	clean_history = compact_history(request.history)
 
 	async def stream_generator():
 		messages = [{"role": "system", "content": request.system_prompt}] + clean_history
@@ -124,17 +193,35 @@ async def chat_endpoint(request: ChatRequest):
 							func = getattr(toolcalls, func_name)
 							result = func(**args)
 						else:
-							result = {"status": "error", "error": f"Unknown tool {func_name}"}
+							result = {
+								"status": "error",
+								"error": f"Unknown tool {func_name}"
+							}
 
-						tool_msg = {
+						#full result to frontend
+						ui_tool_msg = {
 							"role": "tool",
 							"tool_call_id": tool_call.id,
 							"name": func_name,
-							"content": json.dumps(result)
+							"content": json.dumps(result),
 						}
-						messages.append(tool_msg)
 
-						yield json.dumps({"type": "message", "data": tool_msg}) + "\n"
+						#compact res back to model
+						model_tool_msg = {
+							"role": "tool",
+							"tool_call_id": tool_call.id,
+							"name": func_name,
+							"content": compact_tool_result(func_name, result),
+						}
+
+						#compact result back to msg hist
+						messages.append(model_tool_msg)
+
+						#frontend response
+						yield json.dumps({
+							"type": "message",
+							"data": ui_tool_msg,
+						}) + "\n"
 				else:
 					reasoning = getattr(response_message, "reasoning_content", None)
 					if not reasoning and hasattr(response_message, "model_extra") and response_message.model_extra:

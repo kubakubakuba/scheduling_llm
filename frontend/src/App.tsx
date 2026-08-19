@@ -61,6 +61,13 @@ export default function App() {
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
+    const modelHistory = messages
+    .filter((msg) => {
+      if (msg.role === "user") return true;
+      return msg.role === "assistant" && !msg.tool_calls;
+    })
+    .slice(-12);
+
     try {
       const res = await fetch('http://localhost:8000/api/chat', {
         method: 'POST',
@@ -71,7 +78,7 @@ export default function App() {
           model_name: settings.modelName,
           system_prompt: settings.systemPrompt,
           // Pass messages at the current state, excluding the new user message
-          history: messages
+          history: modelHistory
         })
       });
 
