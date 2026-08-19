@@ -53,11 +53,20 @@ def convert(
 		in_degree = {j.id_job: 0 for j in base_instance.jobs}
 		
 		for p in base_instance.precedences:
-			parent = p.id_parent
-			child = p.id_child
-			adj[parent].append(child)
-			in_degree[child] += 1
-			
+			predecessor = p.id_child
+			successor = p.id_parent
+
+			adj[predecessor].append(successor)
+			in_degree[successor] += 1
+
+		#zero len dummy jobs
+		dummy_sink_ids = {job_id for job_id, successors in adj.items() if durations[job_id] == 0 and not successors}
+
+		if len(dummy_sink_ids) != 1:
+			raise ValueError(
+				f"Expected exactly one dummy sink, found: {dummy_sink_ids}"
+			)
+
 		#init Q
 		queue = [j for j, deg in in_degree.items() if deg == 0]
 		earliest_finish = {j: durations[j] for j in queue}
@@ -119,13 +128,21 @@ def convert(
 			
 		#orders
 		orders_list = []
-		for c in modified_instance.components:
-			sink_id = c.id_root_job
-			
+		for component in modified_instance.components:
+			sink_id = component.id_root_job
+
+			if sink_id in dummy_sink_ids:
+				continue
+
+			if sink_id not in deadlines:
+				raise ValueError(
+					f"Missing deadline for order sink job {sink_id}"
+				)
+
 			orders_list.append({
 				"sink_job": sink_id,
-				"due_date": deadlines.get(sink_id, 0),
-				"weight": c.weight
+				"due_date": deadlines[sink_id],
+				"weight": component.weight
 			})
 		
 		json_data = {
@@ -148,4 +165,6 @@ def convert(
 		typer.echo(f"saved to {json_filename}")
 
 if __name__ == "__main__":
+	random.seed(42)
+
 	app()
