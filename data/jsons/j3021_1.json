@@ -802,27 +802,22 @@
   "orders": [
     {
       "sink_job": 24,
-      "due_date": 7,
+      "due_date": 27,
       "weight": 1
     },
     {
       "sink_job": 27,
-      "due_date": 5,
+      "due_date": 21,
       "weight": 1
     },
     {
       "sink_job": 29,
-      "due_date": 0,
+      "due_date": 28,
       "weight": 1
     },
     {
       "sink_job": 30,
-      "due_date": 2,
-      "weight": 1
-    },
-    {
-      "sink_job": 32,
-      "due_date": 0,
+      "due_date": 30,
       "weight": 1
     }
   ]

@@ -8,18 +8,104 @@ import copy
 
 sys.path.append(os.path.abspath(".."))
 from solver import MRCPSP_solver
-from llm_api.schema_validator import validate_instance
-from llm_api.graph_validator import validate_precedence_graph
+
+from llm_api.schema_validator import (
+	validate_instance,
+	would_create_cycle
+)
+
+from llm_api.util import (
+	InvalidPathError,
+	_get_path,
+	_set_path,
+	_atomic_write_json,
+	_commit_candidate as _write_commit_candidate
+)
 
 #caching
 current_instance = {}
-latest_schedule = {}
-latest_obj_val = 0
+current_revision = 0
 
-def load_instance(filepath: str):
+latest_schedule = {}
+latest_obj_val = None
+
+latest_solver = None
+latest_solver_result = None
+latest_solved_revision = None
+
+def _invalidate_solver_cache():
+	global latest_schedule
+	global latest_obj_val
+	global latest_solver
+	global latest_solver_result
+	global latest_solved_revision
+
+	latest_schedule = {}
+	latest_obj_val = None
+	latest_solver = None
+	latest_solver_result = None
+	latest_solved_revision = None
+
+
+def _validation_failure(errors):
+	return {
+		"status": "rejected",
+		"error_code": "invalid_instance",
+		"message": "The candidate instance failed validation.",
+		"validation_errors": errors,
+		"instance_modified": False,
+	}
+
+
+def _commit_candidate(candidate: dict, message: str) -> dict:
+	"""Validate and commit one candidate instance transactionally."""
 	global current_instance
-	with open(filepath, "r") as f:
-		current_instance = json.load(f)
+	global current_revision
+
+	errors = validate_instance(candidate)
+
+	if errors:
+		return _validation_failure(errors)
+
+	result = _write_commit_candidate(candidate, message)
+
+	#do not change live instance if failed
+	if result.get("status") not in {"success", "committed"}:
+		return result
+
+	current_instance = candidate
+	current_revision += 1
+
+	_invalidate_solver_cache()
+
+	result["revision"] = current_revision
+	result["instance_modified"] = True
+
+	return result
+
+
+def load_instance(filepath: str) -> dict:
+	global current_instance
+	global current_revision
+
+	with open(filepath, "r", encoding="utf-8") as file:
+		candidate = json.load(file)
+
+	errors = validate_instance(candidate)
+
+	if errors:
+		return _validation_failure(errors)
+
+	current_instance = candidate
+	current_revision += 1
+	_invalidate_solver_cache()
+
+	return {
+		"status": "success",
+		"message": "Instance loaded and validated.",
+		"revision": current_revision,
+		"instance_modified": False,
+	}
 
 def get_current_instance() -> dict:
 	return current_instance
@@ -49,120 +135,251 @@ def query_instance_data(paths: list[str]) -> dict:
 
 	return {"status": "success", "data": result}
 
-def edit_json_in_place(path: str, new_value: float) -> dict:
+def edit_json_in_place(path: str, new_value) -> dict:
 	global current_instance
-	print(f"\n[TOOL CALLED] edit_json_in_place: {path} -> {new_value}")
 
-	keys = path.split(".")
-	ref = current_instance
-
-	try:
-		for k in keys[:-1]:
-			if isinstance(ref, list):
-				ref = ref[int(k)]
-			else:
-				ref = ref[k]
-
-		last_key = keys[-1]
-		if isinstance(ref, list):
-			ref[int(last_key)] = new_value
-		else:
-			if last_key not in ref and str(last_key) in ref:
-				last_key = str(last_key)
-			ref[last_key] = new_value
-
-		validate_instance(current_instance)
-
-		file_path = os.path.abspath("updated_instance.json")
-		with open(file_path, "w") as out_f:
-			json.dump(current_instance, out_f, indent=2)
-
-		print(f"[TOOL SUCCESS] Edited {path} and saved.")
-		return {"status": "success", "message": f"Updated {path} to {new_value}"}
-
-	except (KeyError, IndexError, ValueError) as e:
-		return {"status": "error", "error": f"Invalid path {path}: {str(e)}"}
-	except jsonschema.ValidationError as e:
-		return {"status": "schema_error", "error": e.message}
-
-def propose_updated_instance(updated_instance: dict) -> dict:
-	global current_instance
-	print("\n[TOOL CALLED] propose_updated_instance")
-
-	try:
-		validate_instance(updated_instance)
-		current_instance = updated_instance
-
-		file_path = os.path.abspath("updated_instance.json")
-		with open(file_path, "w") as out_f:
-			json.dump(current_instance, out_f, indent=2)
-
-		return {"status": "success", "message": "Instance updated."}
-
-	except jsonschema.ValidationError as e:
+	if not current_instance:
 		return {
-			"status": "schema_error",
-			"error": e.message,
-			"instruction": "Fix the JSON structure according to the error message.",
+			"status": "error",
+			"message": "No instance is currently loaded."
 		}
 
+	candidate = copy.deepcopy(current_instance)
+
+	try:
+		old_value = _get_path(candidate, path)
+
+		if isinstance(old_value, (dict, list)):
+			return {
+				"status": "rejected",
+				"error_code": "not_scalar",
+				"message": (
+					f"The path '{path}' refers to an object or list. "
+					"Use a dedicated structural tool instead."
+				),
+				"instance_modified": False,
+			}
+
+		_set_path(candidate, path, new_value)
+
+		result = _commit_candidate(
+			candidate,
+			f"Updated {path} from {old_value} to {new_value}."
+		)
+
+		result["path"] = path
+		result["old_value"] = old_value
+		result["new_value"] = new_value
+
+		return result
+
+	except InvalidPathError as exc:
+		return {
+			"status": "rejected",
+			"error_code": "invalid_path",
+			"message": str(exc),
+			"instance_modified": False,
+		}
+
+def propose_updated_instance(updated_instance: dict) -> dict:
+	if not isinstance(updated_instance, dict):
+		return {
+			"status": "rejected",
+			"error_code": "invalid_type",
+			"message": "updated_instance must be a JSON object.",
+			"instance_modified": False,
+		}
+
+	candidate = copy.deepcopy(updated_instance)
+
+	result = _commit_candidate(
+		candidate,
+		"The proposed instance was validated and committed."
+	)
+
+	if result["status"] == "rejected":
+		result["instruction"] = (
+			"The candidate was not applied. Correct the reported "
+			"validation errors and propose it again."
+		)
+
+	return result
+
+def build_solver(instance_data: dict) -> MRCPSP_solver:
+	formatted_durations = {
+		int(job): duration
+		for job, duration in instance_data["durations"].items()
+	}
+
+	formatted_predecessors = {
+		int(job): [int(predecessor) for predecessor in predecessors]
+		for job, predecessors in instance_data["predecessors"].items()
+	}
+
+	formatted_requests = {
+		(request["job"], request["resource"]): request["amount"]
+		for request in instance_data["requests"]
+	}
+
+	solver = MRCPSP_solver(
+		jobs=instance_data["jobs"],
+		durations=formatted_durations,
+		predecessors=formatted_predecessors,
+		resources=instance_data["resources"],
+		requests=formatted_requests,
+		shifts=instance_data["shifts"],
+		orders=instance_data["orders"],
+	)
+
+	solver.init_model()
+	return solver
+
 def run_solver(time_limit: int = 30) -> dict:
-	global current_instance, latest_schedule, latest_obj_val
+	global current_instance
+	global current_revision
+	global latest_schedule
+	global latest_obj_val
+	global latest_solver
+	global latest_solver_result
+	global latest_solved_revision
+
 	print(f"\n[TOOL CALLED] run_solver (time_limit={time_limit}s)")
 
 	if not current_instance:
-		return {"status": "error", "error": "No instance is currently loaded."}
-
-	try:
-		formatted_durations = {int(k): v for k, v in current_instance["durations"].items()}
-		formatted_predecessors = {int(k): [int(p) for p in v] for k, v in current_instance.get("predecessors", {}).items()}
-
-		formatted_requests = {}
-		for req in current_instance["requests"]:
-			formatted_requests[(req["job"], req["resource"])] = req["amount"]
-
-		solver = MRCPSP_solver(
-			jobs=current_instance["jobs"],
-			durations=formatted_durations,
-			predecessors=formatted_predecessors,
-			resources=current_instance["resources"],
-			requests=formatted_requests,
-			shifts=current_instance["shifts"],
-			orders=current_instance["orders"],
-		)
-
-		solver.init_model()
-
-		old_stdout = sys.stdout
-		sys.stdout = log_capture = io.StringIO()
-
-		try:
-			obj_val = solver.solve(time_limit=time_limit, log_output=True)
-		finally:
-			sys.stdout = old_stdout
-
-		solver_log = log_capture.getvalue()
-		schedule = solver.get_schedule()
-
-		if obj_val is None or schedule is None:
-			return {
-				"status": "infeasible",
-				"message": "No solution found.",
-				"solver_log": solver_log
-			}
-
-		latest_schedule = {str(k): list(v) for k, v in schedule.items()}
-		latest_obj_val = obj_val
-
 		return {
-			"status": "success",
-			"weighted_tardiness": obj_val,
-			"schedule": latest_schedule,
-			"solver_log": solver_log
+			"status": "error",
+			"error_code": "no_instance",
+			"message": "No instance is currently loaded.",
+			"has_solution": False,
+			"conflict_refiner_available": False,
 		}
 
-	except Exception as e:
-		return {"status": "error", "error": str(e)}
+	#validate before solving
+	validation_errors = validate_instance(current_instance)
+
+	if validation_errors:
+		latest_schedule = {}
+		latest_obj_val = None
+		latest_solver = None
+		latest_solver_result = None
+		latest_solved_revision = None
+
+		return {
+			"status": "invalid_instance",
+			"error_code": "validation_failed",
+			"message": (
+				"The current instance is invalid; "
+				"solving was not attempted."
+			),
+			"validation_errors": validation_errors,
+			"has_solution": False,
+			"schedule": None,
+			"weighted_tardiness": None,
+			"conflict_refiner_available": False,
+		}
+
+	try:
+		solver = build_solver(current_instance)
+
+		result = solver.solve(
+			time_limit=time_limit,
+			log_output=True,
+		)
+
+		#store model definition for conflict refiner
+		latest_solver = solver
+		latest_solver_result = result
+		latest_solved_revision = current_revision
+
+		status = result["status"]
+		has_solution = result.get("has_solution", False)
+
+		if has_solution:
+			raw_schedule = result.get("schedule")
+
+			if raw_schedule is None:
+				raise RuntimeError(
+					"The solver reported a solution but returned no schedule."
+				)
+
+			latest_schedule = {
+				str(job): list(times)
+				for job, times in raw_schedule.items()
+			}
+
+			latest_obj_val = result.get("objective")
+
+			# Keep the names currently expected by your visualisation code.
+			result["schedule"] = latest_schedule
+			result["weighted_tardiness"] = latest_obj_val
+
+		else:
+			latest_schedule = {}
+			latest_obj_val = None
+
+			result["schedule"] = None
+			result["weighted_tardiness"] = None
+
+		messages = {
+			"optimal": (
+				"An optimal schedule was found."
+			),
+			"feasible": (
+				"A feasible schedule was found, but optimality "
+				"was not proved within the search limit."
+			),
+			"infeasible": (
+				"CP Optimizer proved that the instance is infeasible."
+			),
+			"no_solution_limit": (
+				"No feasible solution was found before the solver "
+				"reached its search limit. Infeasibility was not proved."
+			),
+			"unknown": (
+				"The solver stopped without finding a solution or "
+				"proving infeasibility."
+			),
+			"aborted": (
+				"The solver search was aborted."
+			),
+			"solver_error": (
+				"CP Optimizer reported a solver failure."
+			),
+		}
+
+		result["message"] = messages.get(
+			status,
+			"The solver returned an unrecognised status.",
+		)
+
+		# Refinement is allowed only for a proven infeasible result belonging
+		# to the current instance revision.
+		result["conflict_refiner_available"] = (
+			status == "infeasible"
+			and latest_solved_revision == current_revision
+		)
+
+		return result
+
+	except Exception as exc:
+		# Do not leave a previous solver result available after a failed run.
+		latest_schedule = {}
+		latest_obj_val = None
+		latest_solver = None
+		latest_solver_result = None
+		latest_solved_revision = None
+
+		return {
+			"status": "solver_error",
+			"error_code": "solver_exception",
+			"message": "An error occurred while running CP Optimizer.",
+			"error": str(exc),
+			"error_type": type(exc).__name__,
+			"has_solution": False,
+			"schedule": None,
+			"weighted_tardiness": None,
+			"conflict_refiner_available": False,
+		}
 
 def visualize_schedule() -> dict:
 	global current_instance, latest_schedule, latest_obj_val
@@ -294,181 +511,206 @@ def visualize_schedule() -> dict:
 		"precedence": {"nodes": precedence_nodes, "edges": precedence_edges, "max_x": max_x, "max_y": max_y}
 	}
 
-def add_precedence(predecessor: int, successor: int) -> dict:
-	global current_instance, latest_schedule, latest_obj_val
+def add_precedence_constraint(before: int, after: int) -> dict:
+	if before not in current_instance["jobs"]:
+		return {
+			"status": "rejected",
+			"error_code": "unknown_job",
+			"message": f"Unknown job {before}.",
+			"instance_modified": False,
+		}
+
+	if after not in current_instance["jobs"]:
+		return {
+			"status": "rejected",
+			"error_code": "unknown_job",
+			"message": f"Unknown job {after}.",
+			"instance_modified": False,
+		}
 
 	candidate = copy.deepcopy(current_instance)
+	predecessor_map = candidate["predecessors"]
 
-	if predecessor not in candidate["jobs"]:
+	after_key = str(after)
+	predecessor_list = predecessor_map[after_key]
+
+	if before in predecessor_list:
 		return {
 			"status": "rejected",
-			"error": f"Job {predecessor} does not exist."
+			"error_code": "duplicate_precedence",
+			"message": f"The precedence {before} → {after} already exists.",
+			"instance_modified": False,
 		}
 
-	if successor not in candidate["jobs"]:
+	normalised_predecessors = {
+		int(job): [int(p) for p in values]
+		for job, values in predecessor_map.items()
+	}
+
+	if would_create_cycle(
+		candidate["jobs"],
+		normalised_predecessors,
+		before=before,
+		after=after
+	):
 		return {
 			"status": "rejected",
-			"error": f"Job {successor} does not exist."
+			"error_code": "precedence_cycle",
+			"message": (
+				f"Adding {before} → {after} would create "
+				"a circular dependency."
+			),
+			"instance_modified": False,
 		}
 
-	predecessor_list = candidate["predecessors"].setdefault(
-		str(successor), []
+	predecessor_list.append(before)
+
+	return _commit_candidate(
+		candidate,
+		f"Added precedence constraint {before} → {after}."
 	)
 
-	if predecessor in predecessor_list:
-		return {
-			"status": "no_change",
-			"message": (
-				f"Precedence {predecessor} -> {successor} "
-				"already exists."
-			)
-		}
+def set_order_due_date(sink_job: int, due_date: int) -> dict:
+	candidate = copy.deepcopy(current_instance)
 
-	predecessor_list.append(predecessor)
+	matching = [
+		(index, order)
+		for index, order in enumerate(candidate["orders"])
+		if order["sink_job"] == sink_job
+	]
 
-	try:
-		validate_instance(candidate)
-		validate_precedence_graph(candidate)
-	except (ValueError, jsonschema.ValidationError) as error:
+	if len(matching) != 1:
 		return {
 			"status": "rejected",
-			"error": str(error),
-			"instance_changed": False
-		}
-
-	current_instance = candidate
-	latest_schedule = {}
-	latest_obj_val = None
-
-	return {
-		"status": "success",
-		"message": f"Added precedence {predecessor} -> {successor}.",
-		"instance_changed": True
-	}
-
-openai_tools_schema = [
-	{
-		"type": "function",
-		"function": {
-			"name": "query_instance_data",
-			"description": "Query specific parts of the loaded JSON instance using dot notation.",
-			"strict": True,
-			"parameters": {
-				"type": "object",
-				"properties": {
-					"paths": {
-						"type": "array",
-						"items": {
-							"type": "string"
-						},
-						"description": "List of dot-separated paths to retrieve. Example: ['orders', 'durations.22', 'shifts.R1']"
-					}
-				},
-				"required": ["paths"],
-				"additionalProperties": False
-			}
-		}
-	},
-	{
-		"type": "function",
-		"function": {
-			"name": "edit_json_in_place",
-			"description": "Edit a specific scalar value. Use ONLY dot notation for arrays (e.g., 'orders.0.due_date'). DO NOT use brackets like 'orders[0]'.",
-			"strict": True,
-			"parameters": {
-				"type": "object",
-				"properties": {
-					"path": {
-						"type": "string",
-						"description": "Dot-separated path. Example: 'durations.22' or 'orders.5.due_date'. No brackets allowed."
-					},
-					"new_value": {
-						"type": "number",
-						"description": "The new numerical value to set."
-					}
-				},
-				"required": ["path", "new_value"],
-				"additionalProperties": False
-			}
-		}
-	},
-	{
-		"type": "function",
-		"function": {
-			"name": "propose_updated_instance",
-			"description": "Propose a completely updated Modified-RCPSP problem instance.",
-			"strict": True,
-			"parameters": {
-				"type": "object",
-				"properties": {
-					"updated_instance": {
-						"type": "object",
-						"description": "The full JSON object representing the modified problem."
-					}
-				},
-				"required": ["updated_instance"],
-				"additionalProperties": False
-			}
-		}
-	},
-	{
-		"type": "function",
-		"function": {
-			"name": "run_solver",
-			"description": "Run the CP Optimizer solver on the current problem instance state.",
-			"strict": True,
-			"parameters": {
-				"type": "object",
-				"properties": {
-					"time_limit": {
-						"type": "integer",
-						"description": "Maximum solver run time in seconds."
-					}
-				},
-				"required": ["time_limit"],
-				"additionalProperties": False
-			}
-		}
-	},
-	{
-		"type": "function",
-		"function": {
-			"name": "visualize_schedule",
-			"description": "Generate visualization data for the current solved schedule (Gantt chart timeline).",
-			"strict": True,
-			"parameters": {
-				"type": "object",
-				"properties": {},
-				"required": [],
-				"additionalProperties": False
-			}
-		}
-	},
-	{
-	"type": "function",
-		"function": {
-			"name": "add_precedence",
-			"description": (
-				"Atomically add predecessor -> successor. "
-				"The backend rejects duplicates, unknown jobs, "
-				"self-loops, and precedence cycles."
+			"error_code": "unknown_or_duplicate_order",
+			"message": (
+				f"Expected exactly one order with sink job {sink_job}."
 			),
-			"strict": True,
-			"parameters": {
-				"type": "object",
-				"properties": {
-					"predecessor": {
-						"type": "integer",
-						"description": "Job that must finish first."
-					},
-					"successor": {
-						"type": "integer",
-						"description": "Job that may start afterwards."
-					}
-				},
-				"required": ["predecessor", "successor"],
-				"additionalProperties": False
-			}
+			"instance_modified": False,
 		}
-	}
-]
+
+	index, order = matching[0]
+	old_due_date = order["due_date"]
+	candidate["orders"][index]["due_date"] = due_date
+
+	result = _commit_candidate(
+		candidate,
+		(
+			f"Changed due date of order {sink_job} "
+			f"from {old_due_date} to {due_date}."
+		)
+	)
+
+	result.update({
+		"sink_job": sink_job,
+		"old_due_date": old_due_date,
+		"new_due_date": due_date,
+	})
+
+	return result
+
+def set_job_duration(job: int, duration: int) -> dict:
+	if job not in current_instance["jobs"]:
+		return {
+			"status": "rejected",
+			"error_code": "unknown_job",
+			"message": f"Unknown job {job}.",
+			"instance_modified": False,
+		}
+
+	candidate = copy.deepcopy(current_instance)
+	key = str(job)
+
+	old_duration = candidate["durations"][key]
+	candidate["durations"][key] = duration
+
+	result = _commit_candidate(
+		candidate,
+		(
+			f"Changed duration of job {job} "
+			f"from {old_duration} to {duration}."
+		)
+	)
+
+	result.update({
+		"job": job,
+		"old_duration": old_duration,
+		"new_duration": duration,
+	})
+
+	return result
+
+def set_resource_capacity(
+	resource: str,
+	start: int,
+	end: int,
+	capacity: int
+) -> dict:
+	if resource not in current_instance["shifts"]:
+		return {
+			"status": "rejected",
+			"error_code": "unknown_resource",
+			"message": f"Unknown resource {resource}.",
+			"instance_modified": False,
+		}
+
+	candidate = copy.deepcopy(current_instance)
+	intervals = candidate["shifts"][resource]
+
+	matches = [
+		index
+		for index, interval in enumerate(intervals)
+		if interval[0] == start and interval[1] == end
+	]
+
+	if len(matches) != 1:
+		return {
+			"status": "rejected",
+			"error_code": "interval_not_found",
+			"message": (
+				f"No unique interval [{start}, {end}) exists "
+				f"for resource {resource}."
+			),
+			"instance_modified": False,
+		}
+
+	index = matches[0]
+	old_capacity = intervals[index][2]
+	intervals[index][2] = capacity
+
+	result = _commit_candidate(
+		candidate,
+		(
+			f"Changed capacity of {resource} during "
+			f"[{start}, {end}) from {old_capacity} to {capacity}."
+		)
+	)
+
+	result.update({
+		"resource": resource,
+		"start": start,
+		"end": end,
+		"old_capacity": old_capacity,
+		"new_capacity": capacity,
+	})
+
+	return result
+
+def remove_precedence_constraint(before: int, after: int) -> dict:
+	candidate = copy.deepcopy(current_instance)
+	after_key = str(after)
+
+	if before not in candidate["predecessors"].get(after_key, []):
+		return {
+			"status": "rejected",
+			"error_code": "precedence_not_found",
+			"message": f"The precedence {before} → {after} does not exist.",
+			"instance_modified": False,
+		}
+
+	candidate["predecessors"][after_key].remove(before)
+
+	return _commit_candidate(
+		candidate,
+		f"Removed precedence constraint {before} → {after}."
+	)
