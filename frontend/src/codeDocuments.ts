@@ -20,6 +20,7 @@ export function sourceDocumentId(toolCall: { id: string; function: { name: strin
   if (toolCall.function.name === 'write_solver_variant') return `solver-variant-${toolCall.id}`;
   if (toolCall.function.name === 'write_analysis_script') return `analysis-${toolCall.id}`;
   if (toolCall.function.name === 'write_visualization_applet') return `visualization-${toolCall.id}`;
+  if (toolCall.function.name === 'get_library_item_source') return `library-source-${toolCall.id}`;
   return null;
 }
 
@@ -46,9 +47,15 @@ export function extractCodeDocuments(messages: ChatMessage[], systemPrompt: stri
       if (!id) continue;
       const result = toolResults.get(call.id);
       const args = jsonObject(call.function.arguments);
-      let source: string | null = null;
-      let title = call.function.name;
-      let kind: CodeDocument['kind'] = call.function.name === 'write_analysis_script' ? 'analysis' : call.function.name === 'write_visualization_applet' ? 'visualization' : 'solver';
+      let source: string | null;
+      let title: string;
+      const kind: CodeDocument['kind'] = call.function.name === 'write_analysis_script'
+        ? 'analysis'
+        : call.function.name === 'write_visualization_applet'
+          ? 'visualization'
+          : call.function.name === 'get_library_item_source'
+            ? (args?.kind === 'visualization' ? 'visualization' : 'analysis')
+            : 'solver';
       let description: string | undefined;
       if (call.function.name === 'get_solver_source') {
         source = typeof result?.source === 'string' ? result.source : null;
@@ -61,6 +68,11 @@ export function extractCodeDocuments(messages: ChatMessage[], systemPrompt: stri
         source = sourceFromArguments(call.function.arguments);
         title = typeof args?.name === 'string' ? `Analysis: ${args.name}` : 'Analysis script';
         description = typeof args?.description === 'string' ? args.description : undefined;
+      } else if (call.function.name === 'get_library_item_source') {
+        const resultItem = result?.item && typeof result.item === 'object' ? result.item as Record<string, unknown> : null;
+        source = typeof resultItem?.source === 'string' ? resultItem.source : null;
+        title = typeof resultItem?.name === 'string' ? `${kind === 'visualization' ? 'Visualization' : 'Analysis'}: ${resultItem.name}` : 'Library source';
+        description = typeof resultItem?.description === 'string' ? resultItem.description : undefined;
       } else {
         source = sourceFromArguments(call.function.arguments);
         title = typeof args?.name === 'string' ? `Visualization: ${args.name}` : 'Visualization applet';

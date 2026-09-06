@@ -121,7 +121,7 @@ def _atomic_write_json(path, data):
 		raise
 
 
-def _commit_candidate(candidate, description):
+def _commit_candidate(candidate, description, path="updated_instance.json"):
 	global current_instance
 
 	validation_error = _validate_candidate(candidate)
@@ -135,7 +135,8 @@ def _commit_candidate(candidate, description):
 		}
 
 	try:
-		_atomic_write_json("updated_instance.json", candidate)
+		if path is not None:
+			_atomic_write_json(path, candidate)
 	except OSError as exc:
 		return {
 			"status": "error",

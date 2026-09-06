@@ -5,7 +5,7 @@ import ConversationSidebar from './components/ConversationSidebar';
 import { extractCodeDocuments, sourceDocumentId } from './codeDocuments';
 
 const CodeWorkspace = lazy(() => import('./components/CodeWorkspace'));
-import type { Settings, ChatMessage, BackendConfig, ConfigStatus, Conversation } from './types';
+import type { Settings, ChatMessage, BackendConfig, ConfigStatus, Conversation, LibraryReference } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -47,6 +47,8 @@ export default function App() {
   const activeGenerationId = useRef<string | null>(null);
   const [isCodeWorkspaceOpen, setIsCodeWorkspaceOpen] = useState(false);
   const [selectedCodeDocument, setSelectedCodeDocument] = useState<string | null>(null);
+  const [codeWorkspaceSection, setCodeWorkspaceSection] = useState<'library' | 'conversation' | 'prompt'>('library');
+  const [pendingLibraryReferences, setPendingLibraryReferences] = useState<LibraryReference[]>([]);
   const conversationLoaded = useRef(false);
   const elapsedAnchor = useRef({ seconds: 0, at: 0 });
   const settingsSaveTimer = useRef<number | null>(null);
@@ -180,6 +182,7 @@ export default function App() {
     setConversations((previous) => [created, ...previous]);
     setMessages([]);
     setInstanceName(null);
+    setPendingLibraryReferences([]);
   };
 
   const handleSelectConversation = async (id: string) => {
@@ -189,6 +192,7 @@ export default function App() {
     setMessages((detail.messages ?? []) as ChatMessage[]);
     setSettings((previous) => settingsFromBackend(detail.settings ?? {}, previous));
     setInstanceName(detail.workspace?.instance?.instance_name ?? null);
+    setPendingLibraryReferences([]);
   };
 
   const handlePin = async (conversation: Conversation) => {
@@ -268,7 +272,8 @@ export default function App() {
   };
 
   const openCodeWorkspace = (documentId?: string | null) => {
-    setSelectedCodeDocument(documentId ?? 'system-prompt');
+    setSelectedCodeDocument(documentId ?? null);
+    setCodeWorkspaceSection(documentId === 'system-prompt' ? 'prompt' : documentId ? 'conversation' : 'library');
     setIsCodeWorkspaceOpen(true);
     setIsSettingsOpen(false);
   };
@@ -295,8 +300,10 @@ export default function App() {
       return;
     }
 
-    const userMessage: ChatMessage = { role: 'user', content };
+    const references = pendingLibraryReferences;
+    const userMessage: ChatMessage = { role: 'user', content, library_references: references };
     setMessages(prev => [...prev, userMessage]);
+    setPendingLibraryReferences([]);
     setIsLoading(true);
     setIsStopping(false);
     setGenerationStatus({ stage: 'thinking', elapsedSeconds: 0 });
@@ -332,6 +339,7 @@ export default function App() {
           request_timeout_seconds: settings.requestTimeoutSeconds,
           max_tool_rounds: settings.maxToolRounds,
           sandbox_timeout_seconds: settings.sandboxTimeoutSeconds,
+          library_references: references.map(({ kind, id }) => ({ kind, id })),
         })
       });
 
@@ -405,10 +413,10 @@ export default function App() {
 
     {/* Code workspace and configuration controls */}
     <button
-    onClick={() => openCodeWorkspace('system-prompt')}
+    onClick={() => openCodeWorkspace()}
     className="absolute top-4 right-14 z-40 p-2 text-zinc-500 hover:text-zinc-200 bg-[#1a1a1a] border border-zinc-800 rounded-md transition-colors shadow-sm"
-    aria-label="Open code workspace"
-    title="Code workspace"
+    aria-label="Open code library"
+    title="Code library"
     >
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14" /></svg>
     </button>
@@ -436,6 +444,8 @@ export default function App() {
     generationStatus={generationStatus}
     onStop={handleStopGeneration}
     onOpenSource={(toolCall) => openCodeWorkspace(sourceDocumentId(toolCall))}
+    pendingLibraryReferences={pendingLibraryReferences}
+    onRemoveLibraryReference={(reference) => setPendingLibraryReferences((previous) => previous.filter((item) => item.kind !== reference.kind || item.id !== reference.id))}
     />
 
     <SettingsPanel
@@ -456,11 +466,20 @@ export default function App() {
     )}
     <Suspense fallback={null}>
       <CodeWorkspace
+        key={`${isCodeWorkspaceOpen ? 'open' : 'closed'}:${codeWorkspaceSection}:${selectedCodeDocument ?? ''}`}
         isOpen={isCodeWorkspaceOpen}
         documents={codeDocuments}
         selectedId={selectedCodeDocument}
+        initialSection={codeWorkspaceSection}
+        mutationsDisabled={isLoading}
         onClose={() => setIsCodeWorkspaceOpen(false)}
         onSavePrompt={saveSystemPrompt}
+        onAttach={(item) => {
+          const reference: LibraryReference = { kind: item.kind, id: item.id, name: item.name, description: item.description, status: item.status, origin: item.origin, source_hash: item.source_hash };
+          setPendingLibraryReferences((previous) => previous.some((existing) => existing.kind === reference.kind && existing.id === reference.id) ? previous : [...previous, reference]);
+          setIsCodeWorkspaceOpen(false);
+        }}
+        onDeleted={(item) => setPendingLibraryReferences((previous) => previous.filter((reference) => reference.kind !== item.kind || reference.id !== item.id))}
       />
     </Suspense>
     </div>

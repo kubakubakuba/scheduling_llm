@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
-import os
 import re
-import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from .sandbox import MIN_TIMEOUT_SECONDS, SandboxRunner
+from .source_library import (
+    APPLET_CANDIDATES,
+    APPLET_LIBRARY,
+    CANDIDATES,
+    LIBRARY,
+    ROOT,
+    SourceLibrary,
+    safe_slug as _safe_slug,
+    source_hash as _hash,
+)
 
-ROOT = Path(__file__).resolve().parents[1]
 BASE_SOLVER = ROOT / "solver.py"
-LIBRARY = ROOT / "analysis" / "library"
-_candidate_root = Path(os.getenv("SCHEDULING_ANALYSIS_DATA", "data/analysis"))
-CANDIDATES = (_candidate_root if _candidate_root.is_absolute() else ROOT / _candidate_root) / "candidates"
-APPLET_LIBRARY = ROOT / "analysis" / "library" / "applets"
-APPLET_CANDIDATES = (_candidate_root if _candidate_root.is_absolute() else ROOT / _candidate_root) / "applets"
 MAX_APPLET_SOURCE_CHARS = 500_000
 MAX_APPLET_BUNDLE_CHARS = 8_000_000
 APPLET_IMPORTS = {
@@ -33,14 +35,6 @@ APPLET_BLOCKED_PATTERNS = (
 )
 
 
-def _hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _safe_slug(value: str) -> str:
-    return "".join(char if char.isalnum() or char in "-_" else "_" for char in value).strip("_") or "candidate"
-
-
 def solver_sandbox_timeout(time_limit: int, maximum: int) -> int | None:
     """Return the solver wall budget, or None when the cap is insufficient."""
     required = int(time_limit) + 30
@@ -53,22 +47,28 @@ class AnalysisManager:
     def __init__(self, runtime: Any):
         self.runtime = runtime
         self.runner = SandboxRunner()
+        self.library = SourceLibrary()
         self.active_variant: str | None = None
-        CANDIDATES.mkdir(parents=True, exist_ok=True)
-        APPLET_CANDIDATES.mkdir(parents=True, exist_ok=True)
 
     def _entries(self) -> list[dict]:
         entries = []
-        for root in (LIBRARY, CANDIDATES):
-            if not root.exists():
+        for item in self.library.list_items(kind="analysis"):
+            full = self.library.get_item("analysis", item["id"])
+            source_path = self.library.source_path("analysis", item["id"])
+            if full is None or source_path is None:
                 continue
-            for manifest in root.glob("*/manifest.json"):
-                try:
-                    item = json.loads(manifest.read_text(encoding="utf-8"))
-                    item["path"] = str(manifest.parent / "script.py")
-                    entries.append(item)
-                except (OSError, json.JSONDecodeError):
-                    continue
+            full["path"] = str(source_path)
+            full["sha256"] = "builtin" if full["origin"] == "bundled" else full["source_hash"]
+            entries.append(full)
+        # Solver variants share the candidate root but are not library items.
+        for manifest in CANDIDATES.glob("*/manifest.json"):
+            try:
+                item = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if item.get("kind") == "solver":
+                item["path"] = str(manifest.parent / "script.py")
+                entries.append(item)
         return entries
 
     def invoke(self, name: str, arguments: dict) -> dict:
@@ -84,6 +84,7 @@ class AnalysisManager:
             "list_visualization_applets": self.list_applets,
             "write_visualization_applet": self.write_applet,
             "run_visualization_applet": self.run_applet,
+            "get_library_item_source": self.get_library_item_source,
         }
         handler = handlers.get(name)
         if handler is None:
@@ -94,9 +95,7 @@ class AnalysisManager:
             return {"status": "error", "error_code": "analysis_manager_error", "message": str(exc), "error_type": type(exc).__name__}
 
     def list_scripts(self, query: str = "") -> dict:
-        query = query.lower().strip()
-        entries = [item for item in self._entries() if not query or query in json.dumps(item).lower()]
-        return {"status": "success", "scripts": [{key: value for key, value in item.items() if key != "path"} for item in entries]}
+        return {"status": "success", "scripts": self.library.list_items(kind="analysis", query=query)}
 
     @staticmethod
     def _validate_analysis_source(source: str) -> list[str]:
@@ -155,11 +154,8 @@ class AnalysisManager:
         errors = self._validate_analysis_source(source)
         if errors:
             return {"status": "rejected", "error_code": "invalid_analysis_source", "validation_errors": errors}
-        script_id = f"candidate-{_safe_slug(name)}-{_hash(source)[:10]}"
-        directory = CANDIDATES / script_id
-        directory.mkdir(parents=True, exist_ok=False)
-        (directory / "script.py").write_text(source, encoding="utf-8")
-        (directory / "manifest.json").write_text(json.dumps({"id": script_id, "name": name, "description": description, "status": "candidate", "sha256": _hash(source), "kind": "analysis"}, indent=2) + "\n", encoding="utf-8")
+        item = self.library.create_candidate("analysis", name=name, description=description, source=source)
+        script_id = item["id"]
         return {"status": "success", "script_id": script_id, "message": "Candidate saved; run it to sandbox-test before promotion."}
 
     def _find(self, script_id: str) -> tuple[dict | None, Path | None]:
@@ -180,10 +176,7 @@ class AnalysisManager:
         if smoke.get("status") != "success":
             return {"status": "error", "error_code": "script_smoke_test_failed", "message": "The analysis script failed its known-fixture smoke test.", "smoke": smoke}
         if item.get("status") == "candidate":
-            manifest_path = source.parent / "manifest.json"
-            updated = {key: value for key, value in item.items() if key != "path"}
-            updated["smoke_passed"] = True
-            manifest_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
+            self.library.mark_smoke_passed("analysis", script_id)
         context = {"instance": self.runtime.instance, "schedule": self.runtime.latest_schedule, "solver_result": self.runtime.latest_solver_result}
         result = self.runner.execute(source, context, parameters or {}, kind="analysis", timeout_seconds=self.runtime.sandbox_timeout_seconds)
         if isinstance(result, dict) and len(json.dumps(result)) > 2_000_000:
@@ -212,48 +205,23 @@ class AnalysisManager:
         return sorted(set(errors))
 
     def list_applets(self, query: str = "") -> dict:
-        query = query.lower().strip()
-        entries: list[dict] = []
-        for root in (APPLET_LIBRARY, APPLET_CANDIDATES):
-            if not root.exists():
-                continue
-            for manifest in root.glob("*/manifest.json"):
-                try:
-                    item = json.loads(manifest.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    continue
-                if not query or query in json.dumps(item).lower():
-                    entries.append(item)
-        return {"status": "success", "applets": entries}
+        return {"status": "success", "applets": self.library.list_items(kind="visualization", query=query)}
 
     def write_applet(self, name: str, description: str, source: str) -> dict:
         errors = self._validate_applet_source(source)
         if errors:
             return {"status": "rejected", "error_code": "invalid_visualization_applet", "validation_errors": errors}
-        applet_id = f"applet-{_safe_slug(name)}-{_hash(source)[:10]}"
-        directory = APPLET_CANDIDATES / applet_id
-        if directory.exists():
-            return {"status": "success", "applet_id": applet_id, "source_hash": _hash(source), "message": "An immutable candidate with this source already exists."}
-        directory.mkdir(parents=True, exist_ok=False)
-        (directory / "source.ts").write_text(source, encoding="utf-8")
-        (directory / "manifest.json").write_text(json.dumps({
-            "id": applet_id, "name": name, "description": description,
-            "status": "candidate", "sha256": _hash(source), "kind": "visualization_applet",
-        }, indent=2) + "\n", encoding="utf-8")
+        item = self.library.create_candidate("visualization", name=name, description=description, source=source)
+        applet_id = item["id"]
         return {"status": "success", "applet_id": applet_id, "source_hash": _hash(source), "message": "Applet candidate saved; it will be compiled and smoke-tested before rendering."}
 
     def _find_applet(self, applet_id: str) -> tuple[dict | None, Path | None]:
-        for root in (APPLET_LIBRARY, APPLET_CANDIDATES):
-            manifest_path = root / applet_id / "manifest.json"
-            if not manifest_path.is_file():
-                continue
-            try:
-                item = json.loads(manifest_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            source = manifest_path.parent / "source.ts"
-            return item, source
-        return None, None
+        item = self.library.get_item("visualization", applet_id, include_source=False)
+        source = self.library.source_path("visualization", applet_id)
+        if item is None or source is None:
+            return None, None
+        item["sha256"] = "builtin" if item["origin"] == "bundled" else item["source_hash"]
+        return item, source
 
     def run_applet(self, applet_id: str, parameters: dict | None = None, analysis_script_id: str | None = None) -> dict:
         item, source = self._find_applet(applet_id)
@@ -283,6 +251,7 @@ class AnalysisManager:
         smoke = self.runner.execute(source, smoke_context, {}, kind="applet", timeout_seconds=min(60, self.runtime.sandbox_timeout_seconds))
         if smoke.get("status") != "success" or not smoke.get("bundle"):
             return {"status": "error", "error_code": "applet_smoke_test_failed", "message": "The applet failed its sandbox compilation smoke test.", "smoke": smoke}
+        self.library.mark_smoke_passed("visualization", applet_id)
         live = self.runner.execute(source, context, {}, kind="applet", timeout_seconds=self.runtime.sandbox_timeout_seconds)
         if live.get("status") != "success" or not live.get("bundle"):
             return {"status": "error", "error_code": "applet_compile_failed", "message": "The applet could not be compiled in the sandbox.", "result": live}
@@ -299,6 +268,42 @@ class AnalysisManager:
             "_applet_bundle_path": str(bundle_path),
             "_applet_context": context,
         }
+
+    def get_library_item_source(self, kind: str, item_id: str) -> dict:
+        try:
+            item = self.library.get_item(kind, item_id)
+        except ValueError as exc:
+            return {"status": "error", "error_code": "invalid_library_kind", "message": str(exc)}
+        if item is None:
+            return {"status": "error", "error_code": "unknown_library_item", "message": f"Unknown library item {item_id}."}
+        return {"status": "success", "item": item}
+
+    def create_library_version(self, kind: str, item_id: str, name: str, description: str, source: str) -> dict:
+        try:
+            normalized_kind = self.library.normalize_kind(kind)
+            parent = self.library.get_item(normalized_kind, item_id, include_source=False)
+        except ValueError as exc:
+            return {"status": "rejected", "error_code": "invalid_library_kind", "message": str(exc)}
+        if parent is None:
+            return {"status": "error", "error_code": "unknown_library_item", "message": f"Unknown library item {item_id}."}
+        errors = self._validate_analysis_source(source) if normalized_kind == "analysis" else self._validate_applet_source(source)
+        if errors:
+            return {"status": "rejected", "error_code": "invalid_library_source", "validation_errors": errors}
+        with tempfile.TemporaryDirectory(prefix="library-version-") as directory:
+            source_path = Path(directory) / ("script.py" if normalized_kind == "analysis" else "source.ts")
+            source_path.write_text(source, encoding="utf-8")
+            if normalized_kind == "analysis":
+                smoke_instance = {"instance_name": "smoke", "jobs": [1], "durations": {"1": 1}, "predecessors": {"1": []}, "resources": ["R1"], "requests": [{"job": 1, "resource": "R1", "amount": 1}], "shifts": {"R1": [[0, 2, 1]]}, "orders": [{"sink_job": 1, "due_date": 1, "weight": 1}]}
+                smoke = self.runner.execute(source_path, {"instance": smoke_instance, "schedule": {"1": [0, 1]}, "solver_result": {"status": "optimal", "objective": 0}}, {}, kind="analysis", timeout_seconds=min(60, self.runtime.sandbox_timeout_seconds))
+                passed = smoke.get("status") == "success"
+            else:
+                smoke_context = {"instance": {}, "schedule": {}, "solver_result": None, "parameters": {}, "analysis": None}
+                smoke = self.runner.execute(source_path, smoke_context, {}, kind="applet", timeout_seconds=min(60, self.runtime.sandbox_timeout_seconds))
+                passed = smoke.get("status") == "success" and bool(smoke.get("bundle"))
+        if not passed:
+            return {"status": "rejected", "error_code": "library_smoke_test_failed", "message": "The edited source failed its sandbox smoke test.", "smoke": smoke}
+        created = self.library.create_candidate(normalized_kind, name=name, description=description, source=source, smoke_passed=True, parent_id=item_id)
+        return {"status": "success", "item": created}
 
     def run_solver_variant(self, arguments: dict | None = None) -> dict:
         if not self.active_variant:

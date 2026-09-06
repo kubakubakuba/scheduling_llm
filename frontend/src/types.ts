@@ -48,6 +48,30 @@ export interface ChatMessage {
     generation_id?: string;
     created_at?: string;
     sequence?: number;
+    library_references?: LibraryReference[];
+}
+
+export interface LibraryReference {
+    kind: 'analysis' | 'visualization';
+    id: string;
+    name: string;
+    description?: string;
+    status?: string;
+    origin?: 'bundled' | 'generated';
+    source_hash?: string;
+}
+
+export interface LibraryItem extends LibraryReference {
+    description: string;
+    origin: 'bundled' | 'generated';
+    status: string;
+    smoke_passed: boolean;
+    source_hash: string;
+    parent_id?: string | null;
+    created_at?: string | null;
+    editable: boolean;
+    deletable: boolean;
+    source?: string;
 }
 
 export interface BackendConfig {

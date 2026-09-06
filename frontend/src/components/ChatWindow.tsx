@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import type { ChatMessage, ConfigStatus, ToolCall } from '../types';
+import type { ChatMessage, ConfigStatus, LibraryReference, ToolCall } from '../types';
 import VisualizationDashboard, { type VisualizationData } from './VisualizationDashboard';
 
 interface ChatWindowProps {
@@ -17,6 +17,8 @@ interface ChatWindowProps {
     onStop: () => void;
     onOpenSource?: (toolCall: ToolCall) => void;
     onNewChat?: () => void;
+    pendingLibraryReferences: LibraryReference[];
+    onRemoveLibraryReference: (reference: LibraryReference) => void;
     instanceName?: string | null;
     configStatus: ConfigStatus;
 }
@@ -235,7 +237,7 @@ function ToolExecutionCard({ toolCall, result, isLoading, onOpenSource, conversa
                     <span className={`tool-call-icon ${pending && isLoading ? 'tool-call-icon-active' : ''}`}><Icon name="wrench" size={15} /></span>
                     <code>{toolCall.function.name}</code>
                 </div>
-                <div className="tool-execution-header-actions">{onOpenSource && ['get_solver_source', 'write_solver_variant', 'write_analysis_script', 'write_visualization_applet'].includes(toolCall.function.name) && <button className="tool-source-button" onClick={() => onOpenSource(toolCall)}>Open source</button>}<span className={`tool-status ${status.className}`}>{status.label}</span></div>
+                <div className="tool-execution-header-actions">{onOpenSource && ['get_solver_source', 'write_solver_variant', 'write_analysis_script', 'write_visualization_applet', 'get_library_item_source'].includes(toolCall.function.name) && <button className="tool-source-button" onClick={() => onOpenSource(toolCall)}>Open source</button>}<span className={`tool-status ${status.className}`}>{status.label}</span></div>
             </div>
             <p className="tool-execution-summary">{toolSummary(payload, toolCall.function.name, pending)}</p>
             <details className="tool-execution-details" open={!pending && isFailedTool(payload)}>
@@ -287,7 +289,7 @@ class VisualizationErrorBoundary extends Component<{ children: ReactNode }, { fa
     }
 }
 
-export default function ChatWindow({ messages, onSendMessage, onFileUpload, isLoading, isStopping, generationStatus, onStop, onOpenSource, onNewChat, instanceName, configStatus, conversationId }: ChatWindowProps & { conversationId?: string | null }) {
+export default function ChatWindow({ messages, onSendMessage, onFileUpload, isLoading, isStopping, generationStatus, onStop, onOpenSource, onNewChat, pendingLibraryReferences, onRemoveLibraryReference, instanceName, configStatus, conversationId }: ChatWindowProps & { conversationId?: string | null }) {
     const [input, setInput] = useState('');
     const [copiedMessage, setCopiedMessage] = useState<number | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -423,6 +425,7 @@ export default function ChatWindow({ messages, onSendMessage, onFileUpload, isLo
                                                 {isUser ? <p>{message.content}</p> : <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{formatContent(message.content)}</ReactMarkdown>}
                                             </div>
                                         )}
+                                        {isUser && message.library_references && message.library_references.length > 0 && <div className="message-library-references">{message.library_references.map((reference) => <span key={`${reference.kind}:${reference.id}`} title={reference.id}>{reference.kind === 'analysis' ? 'Analysis' : 'Applet'} · {reference.name}</span>)}</div>}
                                         {!isUser && message.content && (
                                             <button className="copy-message-button" onClick={() => copyMessage(index, message.content)}>
                                                 <Icon name={copiedMessage === index ? 'check' : 'copy'} size={13} />
@@ -444,6 +447,7 @@ export default function ChatWindow({ messages, onSendMessage, onFileUpload, isLo
             </div>
 
             <div className="composer-wrap">
+                {pendingLibraryReferences.length > 0 && <div className="composer-library-references" aria-label="Attached library items">{pendingLibraryReferences.map((reference) => <span key={`${reference.kind}:${reference.id}`} title={reference.id}><b>{reference.kind === 'analysis' ? 'Analysis' : 'Applet'}</b>{reference.name}<button type="button" onClick={() => onRemoveLibraryReference(reference)} disabled={isLoading} aria-label={`Remove ${reference.name}`}>×</button></span>)}</div>}
                 {instanceName && (
                     <div className="quick-actions" aria-label="Quick actions">
                         <span className="quick-actions-label">Quick actions</span>

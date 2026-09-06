@@ -76,7 +76,7 @@ class ToolRuntime:
             "get_solver_source", "write_solver_variant", "activate_solver_variant",
             "validate_solver_variant", "restore_base_solver",
             "list_visualization_applets", "write_visualization_applet",
-            "run_visualization_applet",
+            "run_visualization_applet", "get_library_item_source",
         }:
             with self._invoke_lock:
                 return self.analysis.invoke(function_name, arguments or {})

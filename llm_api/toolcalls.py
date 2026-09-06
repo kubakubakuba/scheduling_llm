@@ -5,6 +5,9 @@ import io
 import jsonschema
 from collections import defaultdict
 import copy
+from pathlib import Path
+
+from docplex.cp.config import context as cp_context
 
 sys.path.append(os.path.abspath(".."))
 from solver import MRCPSP_solver
@@ -32,6 +35,23 @@ latest_obj_val = None
 latest_solver = None
 latest_solver_result = None
 latest_solved_revision = None
+
+# The web application keeps its historical on-disk behaviour.  Benchmark
+# runtimes set this to None (or to an artifact path) while invoking the same
+# tools, so benchmark attempts never overwrite the repository's instance file.
+persistence_path = "updated_instance.json"
+
+
+def _configure_cpoptimizer_executable():
+	"""Point DOcplex at the mounted IBM installation when one is available."""
+	root = os.getenv("CPLEX_STUDIO_DIR222") or os.getenv("IBM_ILOG_HOST_PATH")
+	if root:
+		candidate = Path(root) / "cpoptimizer" / "bin" / "x86-64_linux" / "cpoptimizer"
+		if candidate.is_file():
+			cp_context.solver.local.execfile = str(candidate)
+
+
+_configure_cpoptimizer_executable()
 
 def _invalidate_solver_cache():
 	global latest_schedule
@@ -67,7 +87,7 @@ def _commit_candidate(candidate: dict, message: str) -> dict:
 	if errors:
 		return _validation_failure(errors)
 
-	result = _write_commit_candidate(candidate, message)
+	result = _write_commit_candidate(candidate, message, path=persistence_path)
 
 	#do not change live instance if failed
 	if result.get("status") not in {"success", "committed"}:
@@ -727,3 +747,128 @@ def remove_precedence_constraint(before: int, after: int) -> dict:
 		candidate,
 		f"Removed precedence constraint {before} → {after}."
 	)
+
+def refine_conflict(time_limit: int = 30) -> dict:
+	global current_instance
+	global current_revision
+	global latest_solver
+	global latest_solver_result
+	global latest_solved_revision
+
+	print(f"\n[TOOL CALLED] refine_conflict (time_limit={time_limit}s)")
+
+	if not current_instance:
+		return {
+			"status": "error",
+			"error_code": "no_instance",
+			"message": "No instance is currently loaded.",
+		}
+
+	if latest_solver is None or latest_solver_result is None:
+		return {
+			"status": "error",
+			"error_code": "no_solver_result",
+			"message": (
+				"No solver result is available. Run the solver before "
+				"requesting conflict refinement."
+			),
+		}
+
+	if latest_solved_revision != current_revision:
+		return {
+			"status": "error",
+			"error_code": "stale_solver_result",
+			"message": (
+				"The instance changed after the latest solve. "
+				"Run the solver again before refining the conflict."
+			),
+		}
+
+	if latest_solver_result.get("status") != "infeasible":
+		return {
+			"status": "error",
+			"error_code": "not_proven_infeasible",
+			"message": (
+				"Conflict refinement is available only after CP Optimizer "
+				"has proved the current instance infeasible."
+			),
+			"solver_status": latest_solver_result.get("status"),
+		}
+
+	def describe_expression(expression) -> dict:
+		name = (
+			expression.get_name()
+			if hasattr(expression, "get_name")
+			else None
+		)
+
+		description = {
+			"name": name,
+			"expression": str(expression),
+		}
+
+		if name:
+			metadata = latest_solver.constraint_metadata.get(name)
+			if metadata is not None:
+				description["metadata"] = metadata
+
+		return description
+
+	try:
+		conflict = latest_solver.m.refine_conflict(
+			ConflictRefinerTimeLimit=time_limit,
+			LogVerbosity="Quiet",
+		)
+
+		if conflict is None or not conflict.is_conflict():
+			return {
+				"status": "no_conflict_found",
+				"message": (
+					"CP Optimizer did not return a valid conflict "
+					"within the conflict-refiner limit."
+				),
+				"revision": current_revision,
+			}
+
+		member_constraints = [
+			describe_expression(expression)
+			for expression in conflict.get_all_member_constraints()
+		]
+
+		possible_constraints = [
+			describe_expression(expression)
+			for expression in conflict.get_all_possible_constraints()
+		]
+
+		member_variables = [
+			describe_expression(expression)
+			for expression in conflict.get_all_member_variables()
+		]
+
+		possible_variables = [
+			describe_expression(expression)
+			for expression in conflict.get_all_possible_variables()
+		]
+
+		return {
+			"status": "success",
+			"message": (
+				"CP Optimizer identified a conflict explaining "
+				"the infeasibility."
+			),
+			"revision": current_revision,
+			"conflict_status": str(conflict.get_conflict_status()),
+			"member_constraints": member_constraints,
+			"possible_constraints": possible_constraints,
+			"member_variables": member_variables,
+			"possible_variables": possible_variables,
+		}
+
+	except Exception as exc:
+		return {
+			"status": "error",
+			"error_code": "conflict_refiner_exception",
+			"message": "CP Optimizer conflict refinement failed.",
+			"error": str(exc),
+			"error_type": type(exc).__name__,
+		}

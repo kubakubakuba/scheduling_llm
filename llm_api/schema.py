@@ -331,5 +331,150 @@ openai_tools_schema = [
 				"additionalProperties": False
 			}
 		}
-	}
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "refine_conflict",
+			"description": (
+				"Run the CP Optimizer conflict refiner on the latest proven "
+				"infeasible solve of the current instance revision. "
+				"Call this directly when run_solver returned status infeasible "
+				"and conflict_refiner_available is true. Do not call run_solver "
+				"again for the same unchanged revision."
+			),
+			"strict": True,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"time_limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 300,
+						"description": (
+							"Maximum conflict-refiner runtime in seconds."
+						),
+					}
+				},
+				"required": ["time_limit"],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "get_library_item_source",
+			"description": "Read the exact immutable source and metadata for an attached or listed analysis script or visualization applet before reviewing or modifying it.",
+			"strict": True,
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"kind": {"type": "string", "enum": ["analysis", "visualization"]},
+					"item_id": {"type": "string"},
+				},
+				"required": ["kind", "item_id"],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "list_analysis_scripts",
+			"description": "List verified and candidate analysis scripts available for the current workspace.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": [], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "write_analysis_script",
+			"description": "Write a new analysis Python script candidate. It must define analyze(context, parameters) and will be sandbox-tested before use.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "source": {"type": "string"}}, "required": ["name", "description", "source"], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "run_analysis_script",
+			"description": "Run a verified or candidate analysis script against the current instance and latest schedule.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"script_id": {"type": "string"}, "parameters": {"type": "object"}}, "required": ["script_id"], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "get_solver_source",
+			"description": "Return the base solver source and its API contract hash for a possible session-scoped variant.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "write_solver_variant",
+			"description": "Store and validate a session-scoped replacement solver source. It is never imported by the backend process.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "source": {"type": "string"}, "base_hash": {"type": "string"}}, "required": ["name", "description", "source", "base_hash"], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "activate_solver_variant",
+			"description": "Activate a previously validated solver variant for this conversation only.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"variant_id": {"type": "string"}}, "required": ["variant_id"], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "validate_solver_variant",
+			"description": "Run API and sandbox validation for a submitted solver variant before activation.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"variant_id": {"type": "string"}}, "required": ["variant_id"], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "restore_base_solver",
+			"description": "Restore the repository solver for this conversation.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "list_visualization_applets",
+			"description": "List reusable verified and candidate TypeScript visualization applets.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": [], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "write_visualization_applet",
+			"description": "Write an immutable read-only TypeScript visualization applet. It must export render(root, context), use only sandbox allowlisted libraries, and match the existing dark schedule-dashboard style (zinc surfaces/borders, compact monospace labels, orange accent, blue jobs, amber on-time sinks, red tardy states, responsive card layout).",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "source": {"type": "string"}}, "required": ["name", "description", "source"], "additionalProperties": False},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "run_visualization_applet",
+			"description": "Compile and render a reusable visualization applet against the current read-only workspace context. Optionally pass a Python analysis result through analysis_script_id.",
+			"strict": True,
+			"parameters": {"type": "object", "properties": {"applet_id": {"type": "string"}, "parameters": {"type": "object"}, "analysis_script_id": {"type": ["string", "null"]}}, "required": ["applet_id"], "additionalProperties": False},
+		},
+	},
 ]

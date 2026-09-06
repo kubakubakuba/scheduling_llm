@@ -8,3 +8,8 @@ _viz.py
 .env
 
 .chainlit/
+
+benchmark/results/
+data/
+frontend/node_modules/
+frontend/dist/

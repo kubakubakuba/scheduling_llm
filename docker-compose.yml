@@ -1,0 +1,65 @@
+services:
+  backend:
+    build: .
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    working_dir: /workspace
+    # Give host-served OpenAI-compatible endpoints a short, stable name.
+    extra_hosts:
+      - "local.ai:host-gateway"
+    volumes:
+      - .:/workspace
+      - app-data:/workspace/data
+      - ${CPLEX_STUDIO_DIR222:-/opt/ibm/ILOG/CPLEX_Studio222}:/opt/ibm/ILOG/CPLEX_Studio222:ro
+    environment:
+      SCHEDULING_DB_PATH: /workspace/data/conversations.sqlite3
+      SANDBOX_RUNNER_URL: http://sandbox-runner:9100
+      IBM_ILOG_HOST_PATH: ${CPLEX_STUDIO_DIR222:-/opt/ibm/ILOG/CPLEX_Studio222}
+      CPLEX_STUDIO_DIR222: /opt/ibm/ILOG/CPLEX_Studio222
+    ports:
+      - "8000:8000"
+    depends_on:
+      sandbox-runner:
+        condition: service_healthy
+  frontend:
+    image: node:22
+    working_dir: /workspace/frontend
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/workspace/frontend
+      - frontend-node-modules:/workspace/frontend/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_LM_STUDIO_URL: http://local.ai:1234/v1
+  sandbox-runner:
+    image: diplomka-sandbox:dev
+    user: root
+    build:
+      context: .
+      dockerfile: analysis/Dockerfile
+    command: uvicorn analysis.runner_service:app --host 0.0.0.0 --port 9100
+    environment:
+      SANDBOX_IMAGE: diplomka-sandbox:dev
+      IBM_ILOG_HOST_PATH: ${CPLEX_STUDIO_DIR222:-/opt/ibm/ILOG/CPLEX_Studio222}
+      CPLEX_STUDIO_DIR222: /opt/ibm/ILOG/CPLEX_Studio222
+      # Make the mounted host socket explicit; this avoids inheriting a stale
+      # or unavailable Docker context inside the runner container.
+      DOCKER_HOST: unix:///var/run/docker.sock
+      SANDBOX_ABSOLUTE_MAX_TIMEOUT_SECONDS: 3600
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CPLEX_STUDIO_DIR222:-/opt/ibm/ILOG/CPLEX_Studio222}:/opt/ibm/ILOG/CPLEX_Studio222:ro
+    ports: []
+    healthcheck:
+      # Verify the runner can actually reach Docker, not only that its HTTP
+      # process is listening. Disposable analyses and solver variants depend
+      # on this socket access.
+      test: ["CMD-SHELL", "/usr/bin/docker version --format '{{.Server.Version}}' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+volumes:
+  app-data:
+  frontend-node-modules:
