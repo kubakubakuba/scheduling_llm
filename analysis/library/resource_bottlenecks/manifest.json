@@ -1,0 +1,8 @@
+{
+  "id": "resource-bottlenecks",
+  "name": "Resource bottlenecks",
+  "description": "Reports peak utilization and saturated ticks for every resource.",
+  "status": "verified",
+  "kind": "analysis",
+  "sha256": "builtin"
+}

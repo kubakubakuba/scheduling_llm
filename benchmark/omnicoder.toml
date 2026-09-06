@@ -1,0 +1,90 @@
+[run]
+output_dir = "results"
+repetitions = 1
+fail_fast = false
+
+[[system_prompts]]
+name = "short"
+txt = "You are a scheduling assistant."
+
+[[system_prompts]]
+name = "long"
+file = "sysprompts/long.txt"
+
+[[system_prompts]]
+name = "long-nosupport"
+file = "sysprompts/long-nosupport.txt"
+
+[[profiles]]
+id = "local-lmstudio-short"
+endpoint = "http://localhost:1234/v1"
+model = "omnicoder"
+system_prompt = "short"
+temperature = 0.0
+top_p = 1.0
+max_tokens = 4096
+request_timeout = 180
+
+[[profiles]]
+id = "local-lmstudio-long"
+endpoint = "http://localhost:1234/v1"
+model = "omnicoder"
+system_prompt = "long"
+temperature = 0.0
+top_p = 1.0
+max_tokens = 4096
+request_timeout = 180
+
+[[profiles]]
+id = "local-lmstudio-long-nosupport"
+endpoint = "http://localhost:1234/v1"
+model = "omnicoder"
+system_prompt = "long-nosupport"
+temperature = 0.0
+top_p = 1.0
+max_tokens = 4096
+request_timeout = 180
+
+[[suites]]
+id = "j3028-isolated"
+instance = "instances/j302_8.json"
+mode = "isolated"
+
+[[suites.cases]]
+id = "move-order-16-due-date"
+prompts = ["First solve the original instance and record its weighted tardiness. Change the due date of the order ending in job 16 from 18 to 40, solve the modified instance, and compare the weighted tardiness values. Explain why the change occurred."]
+reference_actions = [{ tool = "set_order_due_date", arguments = { sink_job = 16, due_date = 40 } }]
+required_tools = { run_solver = 2, set_order_due_date = 1 }
+
+[[suites.cases]]
+id = "add-27-before-28"
+prompts = ["Solve the original instance, then add a precedence constraint requiring job 27 to finish before job 28 starts. Solve the modified instance and report how the schedule and weighted tardiness changed."]
+reference_actions = [{ tool = "add_precedence_constraint", arguments = { before = 27, after = 28 } }]
+required_tools = { run_solver = 2, add_precedence_constraint = 1 }
+
+[[suites.cases]]
+id = "reverse-23-and-4"
+prompts = ["The current solution schedules job 4 before job 23. Solve a baseline, then require job 23 to finish before job 4 starts, solve again, and explain how the schedule and weighted tardiness changed."]
+reference_actions = [{ tool = "add_precedence_constraint", arguments = { before = 23, after = 4 } }]
+required_tools = { run_solver = 2, add_precedence_constraint = 1 }
+
+[[suites.cases]]
+id = "r1-outage"
+prompts = ["Solve the original instance. All workers assigned to resource R1 are unavailable during [24, 48). Set the capacity of resource R1 to zero during this exact interval, solve the modified instance, and compare the weighted tardiness with the original schedule."]
+reference_actions = [{ tool = "set_resource_capacity", arguments = { resource = "R1", start = 24, end = 48, capacity = 0 } }]
+required_tools = { run_solver = 2, set_resource_capacity = 1 }
+
+[[suites.cases]]
+id = "unsupported-release-date"
+prompts = ["Job 29 cannot start before time 40. Set its release date to 40 and solve the modified instance."]
+requires_fresh_solve = false
+check_schedule = false
+check_objective = false
+max_successful_mutations = 0
+response_patterns = ["release[ _]date", "(cannot|can't|unsupported|not represented|not supported)"]
+
+[[suites.cases]]
+id = "release-date-via-r5"
+prompts = ["Job 29 cannot start before time 40, but release dates are not represented by this schema. Use the schema-conforming workaround: add a new resource R5, add a request for job 29 using resource R5 with amount 1, and make R5 available with capacity 1 only during [40, 312). Preserve every unrelated field. Propose the complete updated instance, solve it, and explain the resulting schedule and weighted tardiness."]
+reference_instance = "instances/j302_8_release_r5.json"
+required_tools = { propose_updated_instance = 1 }

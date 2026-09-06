@@ -6,10 +6,11 @@ interface SettingsPanelProps {
     onClose: () => void;
     settings: Settings;
     onSettingsChange: (newSettings: Settings) => void;
+    onEditSystemPrompt: () => void;
     availableModels: string[];
 }
 
-export default function SettingsPanel({ isOpen, onClose, settings, onSettingsChange, availableModels }: SettingsPanelProps) {
+export default function SettingsPanel({ isOpen, onClose, settings, onSettingsChange, onEditSystemPrompt, availableModels }: SettingsPanelProps) {
     if (!isOpen) return null;
 
     const handleProviderChange = (e: ChangeEvent<HTMLSelectElement>) => {
@@ -18,7 +19,7 @@ export default function SettingsPanel({ isOpen, onClose, settings, onSettingsCha
 
         if (provider === 'OpenRouter') newUri = 'https://openrouter.ai/api/v1';
             else if (provider === 'OpenAI Direct') newUri = 'https://api.openai.com/v1';
-                else if (provider === 'LM Studio') newUri = 'http://localhost:1234/v1';
+                else if (provider === 'LM Studio') newUri = import.meta.env.VITE_LM_STUDIO_URL ?? 'http://localhost:1234/v1';
                     else if (provider === 'Custom') newUri = '';
 
                     onSettingsChange({ ...settings, provider, endpointUri: newUri });
@@ -74,14 +75,35 @@ export default function SettingsPanel({ isOpen, onClose, settings, onSettingsCha
         </datalist>
         </div>
 
-        <div className="flex flex-col flex-1">
-        <label className="block text-xs font-medium text-zinc-400 mb-1.5">System Prompt</label>
-        <textarea
-        value={settings.systemPrompt}
-        onChange={(e) => onSettingsChange({ ...settings, systemPrompt: e.target.value })}
-        rows={12}
-        className="w-full bg-zinc-900 border border-zinc-800 rounded p-3 text-xs font-mono text-zinc-300 focus:outline-none focus:border-zinc-600 transition-colors resize-y leading-relaxed"
+        <div>
+        <label className="block text-xs font-medium text-zinc-400 mb-1.5">Model timeout (minutes)</label>
+        <input
+        type="number"
+        min={1}
+        max={60}
+        step={1}
+        value={Math.round(settings.requestTimeoutSeconds / 60)}
+        onChange={(e) => onSettingsChange({ ...settings, requestTimeoutSeconds: Number(e.target.value) * 60 })}
+        className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors"
         />
+        <p className="mt-1 text-[10px] text-zinc-600">Long local-model generations may need several minutes.</p>
+        </div>
+
+        <div>
+        <label className="block text-xs font-medium text-zinc-400 mb-1.5">Maximum tool rounds</label>
+        <input type="number" min={1} max={128} step={1} value={settings.maxToolRounds} onChange={(e) => onSettingsChange({ ...settings, maxToolRounds: Number(e.target.value) })} className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors" />
+        <p className="mt-1 text-[10px] text-zinc-600">One round is one model response containing one or more tool calls.</p>
+        </div>
+
+        <div>
+        <label className="block text-xs font-medium text-zinc-400 mb-1.5">Sandbox maximum (minutes)</label>
+        <input type="number" min={1} max={60} step={1} value={Math.round(settings.sandboxTimeoutSeconds / 60)} onChange={(e) => onSettingsChange({ ...settings, sandboxTimeoutSeconds: Number(e.target.value) * 60 })} className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm font-mono text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors" />
+        <p className="mt-1 text-[10px] text-zinc-600">Solver runs need their requested time plus 30 seconds of cleanup grace.</p>
+        </div>
+
+        <div className="flex flex-col flex-1">
+        <div className="flex items-center justify-between mb-1.5"><label className="block text-xs font-medium text-zinc-400">System Prompt</label></div>
+        <button type="button" className="settings-code-button settings-code-button-wide" onClick={onEditSystemPrompt}>Edit system prompt in Code workspace</button>
         </div>
         </div>
         </div>

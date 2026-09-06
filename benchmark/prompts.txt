@@ -1,0 +1,11 @@
+1.) Solve the original instance. Then change the due date of the order ending in job 16 from 18 to 40, solve the modified instance, and compare the weighted tardiness values. Explain why the change occured.
+
+2.) Add a precedence constraint requiring job 27 to finish before job 28 starts. Solve the modified instance and report how the schedule and weighted tardiness changed.
+
+3.) The current solution schedules job 4 before job 23. Require job 23 to finish before job 4 starts, solve the modified instance, and explain how the schedule and weighted tardiness changed.
+
+4.) Job 29 cannot start before time 40. Set its release date to 40 and solve the modified instance. Explain the solution.
+
+-> you could try to create a new resource R5, that would be for the given job, and that resource would be available from the given release date
+
+5.) All workers assigned to resource R1 are unavailable during the interval [24, 48). Set the capacity of resource R1 to zero during this period, solve the modified instance, and compare the weighted tardiness with the original schedule.

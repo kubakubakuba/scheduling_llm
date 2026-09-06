@@ -1,0 +1,8 @@
+{
+  "id": "tardiness-breakdown",
+  "name": "Order tardiness breakdown",
+  "description": "Recomputes weighted tardiness contribution by order sink.",
+  "status": "verified",
+  "kind": "analysis",
+  "sha256": "builtin"
+}

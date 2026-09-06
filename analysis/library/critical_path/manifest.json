@@ -1,0 +1,8 @@
+{
+  "id": "critical-path",
+  "name": "Precedence critical path",
+  "description": "Longest precedence path using job durations.",
+  "status": "verified",
+  "kind": "analysis",
+  "sha256": "builtin"
+}

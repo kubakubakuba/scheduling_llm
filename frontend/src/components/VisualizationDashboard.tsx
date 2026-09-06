@@ -1,11 +1,95 @@
-import { useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
-export default function VisualizationDashboard({ data }: { data: any }) {
+interface GanttCapacity {
+    start: number;
+    end: number;
+    cap: number;
+}
+
+interface GanttTask {
+    job: number;
+    start: number;
+    end: number;
+    amount: number;
+    y_base: number;
+    is_sink: boolean;
+    due_date: number | null;
+    weight: number | null;
+    tardiness: number | null;
+    weighted_contribution: number | null;
+}
+
+interface GanttResource {
+    capacity: GanttCapacity[];
+    tasks: GanttTask[];
+}
+
+interface UsageResource {
+    usage: number[];
+    capacity: number[];
+}
+
+interface PrecedenceNode {
+    id: number;
+    layer?: number;
+    x: number;
+    y: number;
+    is_sink: boolean;
+}
+
+interface PrecedenceEdge {
+    from?: number;
+    to?: number;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+}
+
+export interface VisualizationData {
+    max_time: number;
+    weighted_tardiness: number | null;
+    gantt: Record<string, GanttResource>;
+    usage: Record<string, UsageResource>;
+    precedence: {
+        max_x: number;
+        max_y: number;
+        edges: PrecedenceEdge[];
+        nodes: PrecedenceNode[];
+    };
+}
+
+export default function VisualizationDashboard({ data }: { data: VisualizationData }) {
     const safeMaxTime = data.max_time > 0 ? data.max_time : 1;
     const [activeTab, setActiveTab] = useState<'gantt' | 'usage' | 'precedence'>('gantt');
+    const [hoveredTask, setHoveredTask] = useState<string | null>(null);
+    const precedenceDataWidth = data.precedence.max_x || 800;
+    const precedenceDataHeight = data.precedence.max_y || 600;
+    const precedenceChartRef = useRef<HTMLDivElement>(null);
+    const [precedenceChartWidth, setPrecedenceChartWidth] = useState(0);
+
+    useEffect(() => {
+        const element = precedenceChartRef.current;
+        if (!element) return;
+
+        const updateWidth = () => setPrecedenceChartWidth(Math.round(element.getBoundingClientRect().width));
+        updateWidth();
+
+        const observer = new ResizeObserver(updateWidth);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [activeTab]);
+
+    // Fill the available panel when there is room, but retain a real canvas
+    // width for narrower panels so larger graphs can be inspected by scrolling
+    // instead of being compressed until their edges become hard to follow.
+    const precedenceCanvasWidth = Math.max(precedenceChartWidth, Math.round(precedenceDataWidth * 1.2));
+    const precedenceYScale = 1.2;
+    const precedenceXScale = precedenceCanvasWidth / precedenceDataWidth;
+    const precedenceYCanvasHeight = Math.max(560, Math.round(precedenceDataHeight * precedenceYScale));
 
     return (
-        <div className="my-2 bg-[#0d0d0d] border border-zinc-800 rounded-lg overflow-hidden font-mono text-xs flex flex-col resize min-w-[50vw] w-[70vw] max-w-[95vw] min-h-[400px] h-[60vh] max-h-[90vh]">
+        <div className="visualization-dashboard my-2 bg-[#0d0d0d] border border-zinc-800 rounded-lg overflow-hidden font-mono text-sm flex flex-col">
         <div className="flex justify-between items-center bg-[#1a1a1a] p-3 border-b border-zinc-800 shrink-0">
         <div className="flex gap-4">
         <button onClick={() => setActiveTab('gantt')} className={activeTab === 'gantt' ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-400'}>Gantt</button>
@@ -25,8 +109,8 @@ export default function VisualizationDashboard({ data }: { data: any }) {
             <span className="flex items-center gap-1.5"><span className="w-4 border-t border-dashed border-fuchsia-400" />Due date</span>
             <span className="text-zinc-600">Hover over a job for details</span>
             </div>
-            {Object.entries(data.gantt).map(([res, resData]: [string, any]) => {
-                const maxAmt = Math.max(...resData.capacity.map((c: any) => c.cap), 1);
+            {Object.entries(data.gantt).map(([res, resData]) => {
+                const maxAmt = Math.max(...resData.capacity.map((c) => c.cap), 1);
                 const pxPerUnit = 20;
                 const height = maxAmt * pxPerUnit;
 
@@ -34,7 +118,7 @@ export default function VisualizationDashboard({ data }: { data: any }) {
                     <div key={res} className="relative">
                     <div className="text-zinc-400 mb-1">Resource {res}</div>
                     <div className="relative bg-zinc-900 border-l border-b border-zinc-700" style={{ height: height + 10 }}>
-                    {resData.capacity.map((cap: any, i: number) => (
+                    {resData.capacity.map((cap, i) => (
                         <div key={`cap-${i}`} className="absolute border-t-2 border-dashed border-red-500/50"
                         style={{
                             left: `${(cap.start / safeMaxTime) * 100}%`,
@@ -43,8 +127,9 @@ export default function VisualizationDashboard({ data }: { data: any }) {
                         }}
                         />
                     ))}
-                    {resData.tasks.map((t: any, i: number) => {
+                    {resData.tasks.map((t, i) => {
                         const isTardy = t.due_date !== null && t.end > t.due_date;
+                        const taskKey = `${res}-${i}`;
                         const tooltip = [
                             `Job ${t.job}`,
                             `Start: ${t.start}`,
@@ -61,7 +146,7 @@ export default function VisualizationDashboard({ data }: { data: any }) {
                         ].join('\n');
 
                         return (
-                            <div key={`task-${i}`} className="group">
+                            <Fragment key={`task-${i}`}>
                             {t.due_date !== null && (
                                 <div
                                 className="pointer-events-none absolute top-0 bottom-0 z-20 border-l border-dashed border-fuchsia-400/80"
@@ -72,24 +157,31 @@ export default function VisualizationDashboard({ data }: { data: any }) {
                                 </span>
                                 </div>
                             )}
-                            <div className={`absolute rounded border border-[#0d0d0d] flex items-center justify-center text-[10px] text-white overflow-hidden z-10 ${
-                                isTardy ? 'bg-red-600' : t.is_sink ? 'bg-amber-600' : 'bg-blue-600'
-                            }`}
+                            <div
+                            className={`group absolute ${hoveredTask === taskKey ? 'z-50' : 'z-10'}`}
+                            onMouseEnter={() => setHoveredTask(taskKey)}
+                            onMouseLeave={() => setHoveredTask(null)}
                             style={{
                                 left: `${(t.start / safeMaxTime) * 100}%`,
                                 width: `${((t.end - t.start) / safeMaxTime) * 100}%`,
                                 bottom: t.y_base * pxPerUnit,
                                 height: t.amount * pxPerUnit
                             }}
+                            >
+                            <div
+                            className={`relative flex h-full w-full items-center justify-center overflow-hidden rounded border border-[#0d0d0d] text-[10px] text-white ${
+                                isTardy ? 'bg-red-600' : t.is_sink ? 'bg-amber-600' : 'bg-blue-600'
+                            }`}
                             title={tooltip}
+                            aria-label={tooltip}
                             >
                             <span className="truncate px-1">{t.job}{t.is_sink ? ' ◆' : ''}</span>
                             </div>
                             <div
-                            className="pointer-events-none absolute z-30 hidden min-w-48 -translate-x-1/2 rounded-md border border-zinc-700 bg-zinc-950/95 p-2.5 text-[10px] leading-4 text-zinc-300 shadow-xl group-hover:block"
+                            className={`pointer-events-none absolute z-30 min-w-48 -translate-x-1/2 rounded-md border border-zinc-700 bg-zinc-950/95 p-2.5 text-[10px] leading-4 text-zinc-300 shadow-xl ${hoveredTask === taskKey ? 'block' : 'hidden'}`}
                             style={{
-                                left: `${(((t.start + t.end) / 2) / safeMaxTime) * 100}%`,
-                                bottom: t.y_base * pxPerUnit + t.amount * pxPerUnit + 6
+                                left: '50%',
+                                bottom: 'calc(100% + 6px)'
                             }}
                             >
                             <div className="mb-1 font-semibold text-white">Job {t.job}{t.is_sink ? ' · Order sink' : ''}</div>
@@ -105,6 +197,7 @@ export default function VisualizationDashboard({ data }: { data: any }) {
                             )}
                             </div>
                             </div>
+                            </Fragment>
                         );
                     })}
                     </div>
@@ -123,26 +216,24 @@ export default function VisualizationDashboard({ data }: { data: any }) {
         )}
 
         {activeTab === 'usage' && (
-            <div className="space-y-8 inline-block min-w-full">
-            {Object.entries(data.usage).map(([res, resData]: [string, any]) => {
+            <div className="space-y-8 w-full min-w-0">
+            {Object.entries(data.usage).map(([res, resData]) => {
                 const maxVal = Math.max(...resData.capacity, ...resData.usage, 1);
                 const height = 120;
-                const scaleX = 20;
-                const width = Math.max(safeMaxTime * scaleX, 600);
 
                 let usagePath = `M 0 ${height}`;
                 for (let i = 0; i < safeMaxTime; i++) {
                     const val = resData.usage[i] || 0;
                     const y = height - (val / maxVal) * height;
-                    usagePath += ` L ${i * scaleX} ${y} L ${(i + 1) * scaleX} ${y}`;
+                    usagePath += ` L ${i} ${y} L ${i + 1} ${y}`;
                 }
-                usagePath += ` L ${width} ${height} Z`;
+                usagePath += ` L ${safeMaxTime} ${height} Z`;
 
                 let capPath = `M 0 ${height - ((resData.capacity[0] || 0) / maxVal) * height}`;
                 for (let i = 0; i < safeMaxTime; i++) {
                     const val = resData.capacity[i] || 0;
                     const y = height - (val / maxVal) * height;
-                    capPath += ` L ${i * scaleX} ${y} L ${(i + 1) * scaleX} ${y}`;
+                    capPath += ` L ${i} ${y} L ${i + 1} ${y}`;
                 }
 
                 return (
@@ -152,15 +243,15 @@ export default function VisualizationDashboard({ data }: { data: any }) {
                     <span>{Math.round(maxVal / 2)}</span>
                     <span>0</span>
                     </div>
-                    <div>
+                    <div className="min-w-0 flex-1">
                     <div className="text-zinc-400 mb-1">Resource {res} Usage</div>
-                    <svg width={width} height={height} className="bg-zinc-900 border-l border-b border-zinc-700 block overflow-visible">
-                    <path d={usagePath} fill="rgba(59, 130, 246, 0.3)" stroke="#3b82f6" strokeWidth="1" />
-                    <path d={capPath} fill="none" stroke="#ef4444" strokeWidth="1.5" strokeDasharray="4 2" />
+                    <svg viewBox={`0 0 ${safeMaxTime} ${height}`} preserveAspectRatio="none" width="100%" height={height} className="bg-zinc-900 border-l border-b border-zinc-700 block overflow-visible">
+                    <path d={usagePath} fill="rgba(59, 130, 246, 0.3)" stroke="#3b82f6" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                    <path d={capPath} fill="none" stroke="#ef4444" strokeWidth="1.5" strokeDasharray="4 2" vectorEffect="non-scaling-stroke" />
                     </svg>
-                    <div className="relative mt-1 text-zinc-500" style={{ width }}>
+                    <div className="relative mt-1 w-full text-zinc-500">
                     {[0, Math.floor(safeMaxTime / 2), safeMaxTime].map((t) => (
-                        <div key={t} className="absolute" style={{ left: t * scaleX }}>
+                        <div key={t} className="absolute" style={{ left: `${(t / safeMaxTime) * 100}%`, transform: t === 0 ? undefined : t === safeMaxTime ? 'translateX(-100%)' : 'translateX(-50%)' }}>
                         {t}
                         </div>
                     ))}
@@ -173,19 +264,21 @@ export default function VisualizationDashboard({ data }: { data: any }) {
         )}
 
         {activeTab === 'precedence' && (
-            <div className="inline-block min-w-full min-h-full">
+            <div ref={precedenceChartRef} className="w-full min-w-0 min-h-full">
             <svg
-            width={data.precedence.max_x || 800}
-            height={data.precedence.max_y || 600}
-            className="bg-[#0a0a0a] block"
+          viewBox={`0 0 ${precedenceCanvasWidth} ${precedenceYCanvasHeight}`}
+          width={precedenceCanvasWidth}
+          height={precedenceYCanvasHeight}
+          preserveAspectRatio="none"
+          className="precedence-chart bg-[#0a0a0a] block"
             >
-            {data.precedence.edges.map((e: any, i: number) => (
-                <line key={i} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} stroke="#52525b" strokeWidth="1.5" />
+            {data.precedence.edges.map((e, i) => (
+                <line key={i} x1={e.x1 * precedenceXScale} y1={e.y1 * precedenceYScale} x2={e.x2 * precedenceXScale} y2={e.y2 * precedenceYScale} stroke="#52525b" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             ))}
-            {data.precedence.nodes.map((n: any) => (
-                <g key={n.id} transform={`translate(${n.x}, ${n.y})`}>
-                <circle r="16" fill={n.is_sink ? "#ea580c" : "#2563eb"} stroke="#18181b" strokeWidth="2" />
-                <text textAnchor="middle" dy=".3em" fill="white" fontSize="11" fontWeight="bold">
+            {data.precedence.nodes.map((n) => (
+                <g key={n.id} transform={`translate(${n.x * precedenceXScale}, ${n.y * precedenceYScale})`}>
+                <circle r="20" fill={n.is_sink ? "#ea580c" : "#2563eb"} stroke="#18181b" strokeWidth="2" />
+                <text textAnchor="middle" dy=".3em" fill="white" fontSize="15" fontWeight="bold">
                 {n.id}
                 </text>
                 </g>

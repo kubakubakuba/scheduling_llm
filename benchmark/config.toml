@@ -1,0 +1,60 @@
+[run]
+output_dir = "results"
+repetitions = 1
+fail_fast = false
+max_tool_rounds = 16
+case_timeout_seconds = 300
+max_solver_time_limit = 30
+
+[[system_prompts]]
+name = "short"
+txt = "You are a scheduling assistant."
+
+[[profiles]]
+id = "local"
+endpoint = "http://localhost:1234/v1"
+model = "local-model"
+system_prompt = "short"
+temperature = 0.0
+top_p = 1.0
+max_tokens = 2048
+request_timeout = 60
+
+[[suites]]
+id = "j3028-isolated"
+instance = "instances/j302_8.json"
+mode = "isolated"
+
+[[suites.cases]]
+id = "move-order-16-due-date"
+prompts = ["Change the due date of order sink 16 to 40 and solve."]
+reference_actions = [{ tool = "set_order_due_date", arguments = { sink_job = 16, due_date = 40 } }]
+
+[[suites.cases]]
+id = "add-27-before-28"
+prompts = ["Add precedence 27 before 28 and solve."]
+reference_actions = [{ tool = "add_precedence_constraint", arguments = { before = 27, after = 28 } }]
+
+[[suites.cases]]
+id = "reverse-23-and-4"
+prompts = ["Add precedence 23 before 4 and solve."]
+reference_actions = [{ tool = "add_precedence_constraint", arguments = { before = 23, after = 4 } }]
+
+[[suites.cases]]
+id = "r1-outage"
+prompts = ["Set R1 capacity to zero from 24 to 48 and solve."]
+reference_actions = [{ tool = "set_resource_capacity", arguments = { resource = "R1", start = 24, end = 48, capacity = 0 } }]
+
+[[suites.cases]]
+id = "unsupported-release-date"
+prompts = ["Set a release date of 40 for job 29. Explain if this is unsupported."]
+forbidden_tools = ["edit_json_in_place", "propose_updated_instance"]
+requires_fresh_solve = false
+check_schedule = false
+check_objective = false
+response_patterns = ["unsupported|cannot|can't|not supported"]
+
+[[suites.cases]]
+id = "release-date-via-r5"
+prompts = ["Model job 29's release at 40 using a dedicated resource R5, then solve."]
+reference_instance = "instances/j302_8_release_r5.json"

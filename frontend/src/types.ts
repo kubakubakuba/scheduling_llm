@@ -3,12 +3,9 @@ export interface Settings {
     endpointUri: string;
     modelName: string;
     systemPrompt: string;
-}
-
-export interface ChatMessage {
-    role: 'user' | 'assistant' | 'system' | 'tool';
-    content: string;
-    tool_call_id?: string;
+    requestTimeoutSeconds: number;
+    maxToolRounds: number;
+    sandboxTimeoutSeconds: number;
 }
 
 export interface MRCPSPInstance {
@@ -30,29 +27,61 @@ export interface MRCPSPInstance {
     }>;
 }
 
-export interface Settings {
-    provider: string;
-    endpointUri: string;
-    modelName: string;
-    systemPrompt: string;
+export interface ToolCall {
+    id: string;
+    type: string;
+    function: {
+        name: string;
+        arguments: string;
+    };
 }
 
 export interface ChatMessage {
     role: 'user' | 'assistant' | 'system' | 'tool';
     content: string;
     reasoning?: string | null;
-    tool_calls?: Array<{
-        id: string;
-        type: string;
-        function: { name: string; arguments: string };
-    }>;
+    tool_calls?: ToolCall[];
     tool_call_id?: string;
     name?: string;
+    incomplete?: boolean;
+    status?: string;
+    generation_id?: string;
+    created_at?: string;
+    sequence?: number;
 }
 
 export interface BackendConfig {
     default_endpoint: string;
     default_model: string;
     default_system_prompt: string;
+    default_request_timeout_seconds: number;
+    default_max_tool_rounds: number;
+    default_sandbox_timeout_seconds: number;
     available_models: string[];
+}
+
+export interface CodeDocument {
+    id: string;
+    title: string;
+    kind: 'prompt' | 'solver' | 'analysis' | 'visualization';
+    language: 'markdown' | 'python' | 'typescript';
+    source: string;
+    readOnly: boolean;
+    description?: string;
+    status?: string;
+    sourceHash?: string;
+}
+
+export interface ConfigStatus {
+    state: 'loading' | 'ready' | 'error';
+    message?: string;
+}
+
+export interface Conversation {
+    id: string;
+    title: string;
+    created_at: string;
+    updated_at: string;
+    pinned: boolean;
+    deleted_at?: string | null;
 }
